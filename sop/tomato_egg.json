@@ -79,6 +79,16 @@
             "min_confidence": 0.6
           },
           {
+            "id": "prep_visual_progress",
+            "event_type": "vlm.step_assessment",
+            "payload_matches": {
+              "step_id": "step_01_prepare",
+              "phase": "in_progress"
+            },
+            "weight": 0.25,
+            "min_confidence": 0.6
+          },
+          {
             "id": "prep_confirm",
             "event_type": "voice.user_confirmation",
             "payload_matches": {
@@ -141,6 +151,16 @@
             "min_confidence": 0.6
           },
           {
+            "id": "egg_visual_progress",
+            "event_type": "vlm.step_assessment",
+            "payload_matches": {
+              "step_id": "step_02_scramble_egg",
+              "phase": "in_progress"
+            },
+            "weight": 0.25,
+            "min_confidence": 0.6
+          },
+          {
             "id": "egg_confirm",
             "event_type": "voice.user_confirmation",
             "payload_matches": {
@@ -197,6 +217,16 @@
               "phase": "likely_complete"
             },
             "weight": 0.55,
+            "min_confidence": 0.6
+          },
+          {
+            "id": "tomato_visual_progress",
+            "event_type": "vlm.step_assessment",
+            "payload_matches": {
+              "step_id": "step_03_soften_tomato",
+              "phase": "in_progress"
+            },
+            "weight": 0.3,
             "min_confidence": 0.6
           },
           {
@@ -260,6 +290,16 @@
               "phase": "likely_complete"
             },
             "weight": 0.5,
+            "min_confidence": 0.6
+          },
+          {
+            "id": "mixed_visual_progress",
+            "event_type": "vlm.step_assessment",
+            "payload_matches": {
+              "step_id": "step_04_combine_and_plate",
+              "phase": "in_progress"
+            },
+            "weight": 0.25,
             "min_confidence": 0.6
           },
           {
