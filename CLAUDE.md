@@ -1,4 +1,5 @@
 # CLAUDE.md — NomaChef(诺妈)项目上下文
+> **2026-07-23 架构更新:** 当前硬件主线已改为 DFRobot ESP32-S3 AI CAM (DFR1154) + 后端 AI。关于硬件、端到端架构、语音视觉同步、RAG 和数据集的最新决策，以 [`docs/NOMACHEF-TECHNICAL-SPEC.md`](docs/NOMACHEF-TECHNICAL-SPEC.md) 为准。本文件后文的 Raspberry Pi 5 描述仅保留为历史上下文。
 > **产品名:NomaChef(英)/ 诺妈(中)。** "No Mom Cook" + The Mom Test 彩蛋;中文取"承诺妈妈"正向反转。
 > Slogan:「妈,我会做饭了。」/ "Mom, I cooked." 成品分享功能名:「喏,妈」。梗弹药:「妈见夸」。
 > 仓库目录:`~/Documents/NomaChef`
