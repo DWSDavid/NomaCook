@@ -30,7 +30,7 @@
         "question_after_ms": 20000,
         "question": "番茄切好、鸡蛋也打匀了吗？",
         "evidence_rules": [
-          {"id": "prep_objects", "event_type": "perception.objects_present", "payload_matches": {"step_id": "step_01_prepare", "state": "tomato_egg_tools_ready"}, "weight": 0.3, "min_confidence": 0.65},
+          {"id": "prep_objects", "event_type": "perception.objects_present", "payload_matches": {"step_id": "step_01_prepare", "state": "tomato_egg_tools_ready"}, "weight": 0.3, "min_confidence": 0.35},
           {"id": "prep_visual", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_01_prepare", "phase": "likely_complete"}, "weight": 0.4, "min_confidence": 0.75},
           {"id": "prep_confirm", "event_type": "voice.user_confirmation", "payload_matches": {"step_id": "step_01_prepare", "confirmed": true}, "weight": 0.3, "min_confidence": 0.9}
         ]
