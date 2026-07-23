@@ -17,6 +17,7 @@ from server.perception import (
     ContextualVocabularyController,
     build_detection_context,
     canonicalize_detections,
+    extract_tomato_egg_color_signals,
 )
 
 
@@ -44,7 +45,12 @@ def _open_capture(source: int | str) -> cv2.VideoCapture:
     return capture
 
 
-def _draw(frame, detections: list[ContextDetection], latency_ms: float) -> None:
+def _draw(
+    frame,
+    detections: list[ContextDetection],
+    latency_ms: float,
+    color_text: str | None,
+) -> None:
     for detection in detections:
         x1, y1, x2, y2 = detection.box
         color = COLORS[detection.role]
@@ -73,12 +79,23 @@ def _draw(frame, detections: list[ContextDetection], latency_ms: float) -> None:
         2,
         cv2.LINE_AA,
     )
+    if color_text:
+        cv2.putText(
+            frame,
+            color_text,
+            (20, 65),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            (0, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sop", default="sop/fried_rice.json")
-    parser.add_argument("--step", default="step_04_season")
+    parser.add_argument("--sop", default="sop/tomato_egg.json")
+    parser.add_argument("--step", default="step_01_prepare")
     parser.add_argument("--source", default="1")
     parser.add_argument("--device", default="mps")
     parser.add_argument(
@@ -90,6 +107,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--detect-every", type=int, default=3)
     parser.add_argument("--duration", type=float, default=0)
     parser.add_argument("--no-display", action="store_true")
+    parser.add_argument(
+        "--color-signals",
+        action="store_true",
+        help="print tomato/egg HSV signals inside the detected wok ROI",
+    )
     parser.add_argument("--list-steps", action="store_true")
     return parser
 
@@ -133,6 +155,8 @@ def main() -> None:
     frame_number = 0
     latest: list[ContextDetection] = []
     previous_signature: tuple[tuple[str, float], ...] = ()
+    color_text: str | None = None
+    previous_color_state: str | None = None
 
     try:
         while True:
@@ -154,8 +178,29 @@ def main() -> None:
                     )
                     previous_signature = signature
 
+                if args.color_signals:
+                    wok = next(
+                        (
+                            item
+                            for item in latest
+                            if item.canonical_label == "wok" and item.role == "primary"
+                        ),
+                        None,
+                    )
+                    if wok is None:
+                        color_text = "color ROI: waiting for wok"
+                    else:
+                        signals = extract_tomato_egg_color_signals(frame, wok.box)
+                        color_text = (
+                            f"color={signals.state} red={signals.red_ratio:.2f} "
+                            f"yellow={signals.yellow_ratio:.2f}"
+                        )
+                        if signals.state != previous_color_state:
+                            print(color_text)
+                            previous_color_state = signals.state
+
             if not args.no_display:
-                _draw(frame, latest, detector.last_latency_ms)
+                _draw(frame, latest, detector.last_latency_ms, color_text)
                 cv2.imshow("NomaChef context detection", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
