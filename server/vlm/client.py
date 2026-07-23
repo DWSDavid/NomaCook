@@ -12,6 +12,37 @@ from .schema import VLMDecisionRequest, VLMObservation
 
 DEFAULT_VLM_MODEL = "gemini-3.6-flash"
 
+# Explicit API-native schema. Passing the pydantic model directly emits
+# additionalProperties (from extra="forbid"), which the Gemini API rejects
+# with 400 INVALID_ARGUMENT. Field set mirrors VLMObservation; optional
+# fields with defaults stay out of `required` so validation still fills them.
+_RESPONSE_SCHEMA = types.Schema(
+    type=types.Type.OBJECT,
+    properties={
+        "decision_id": types.Schema(type=types.Type.STRING),
+        "step_id": types.Schema(type=types.Type.STRING),
+        "context_version": types.Schema(type=types.Type.INTEGER),
+        "frame_id": types.Schema(type=types.Type.STRING),
+        "phase": types.Schema(
+            type=types.Type.STRING,
+            enum=["not_started", "in_progress", "likely_complete"],
+        ),
+        "confidence": types.Schema(type=types.Type.NUMBER),
+        "observed_objects": types.Schema(
+            type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING)
+        ),
+        "risk_level": types.Schema(
+            type=types.Type.STRING, enum=["none", "warning", "critical"]
+        ),
+        "risk_reason": types.Schema(type=types.Type.STRING, nullable=True),
+        "reason": types.Schema(type=types.Type.STRING),
+    },
+    required=[
+        "decision_id", "step_id", "context_version", "frame_id",
+        "phase", "confidence", "reason",
+    ],
+)
+
 SYSTEM_PROMPT = """
 你是 NomaChef 的低频视觉确认器。只根据当前图片判断指定步骤的静态结束状态。
 不要根据菜谱常识猜测用户已经做过某个动作；看不清时降低 confidence，并选择
@@ -62,7 +93,7 @@ class GeminiVLMClient:
             ],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=VLMObservation,
+                response_schema=_RESPONSE_SCHEMA,
             ),
         )
         if not response.text:

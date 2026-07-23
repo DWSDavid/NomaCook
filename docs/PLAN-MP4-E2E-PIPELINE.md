@@ -1839,13 +1839,13 @@ git commit -m "pipeline: per-run markdown report + legacy logger deprecation not
 
 ## 终验矩阵(Claude 执行,全部勾掉才算"MP4 全流程跑通")
 
-- [ ] `.venv/bin/python -m pytest tests/ -q` 全绿(含新增 ~15 项)
-- [ ] `.venv/bin/python -m pytest tests/ -q -m e2e` 通过(确定性 + 全产物)
-- [ ] 同一 MP4 两次运行 `replay compare` 输出 `equal`
-- [ ] `--script` 模式:4 次 STEP DONE,`final=completed`,`report.md` 有 4 行 transition
-- [ ] `--vlm gemini` 模式:真实 VLM 至少 1 次被触发并作为证据入 events.jsonl(实机,需 key)
-- [ ] `harness/clean_sessions.py --all` 能一键清空所有 run 产物
-- [ ] 标注 MP4 可播放,帧数与输入一致,关键帧 jpg 是无标注原始帧
+- [x] `.venv/bin/python -m pytest tests/ -q` 全绿(含新增 ~15 项)
+- [x] `.venv/bin/python -m pytest tests/ -q -m e2e` 通过(确定性 + 全产物)
+- [x] 同一 MP4 两次运行 `replay compare` 输出 `equal`
+- [x] `--script` 模式:4 次 STEP DONE,`final=completed`,`report.md` 有 4 行 transition
+- [x] `--vlm gemini` 模式:真实 VLM 至少 1 次被触发并作为证据入 events.jsonl(实机,需 key)
+- [x] `harness/clean_sessions.py --all` 能一键清空所有 run 产物
+- [x] 标注 MP4 可播放,帧数与输入一致,关键帧 jpg 是无标注原始帧
 
 ## 计划外但已知的后续(不在本计划做,防止 scope 蔓延)
 

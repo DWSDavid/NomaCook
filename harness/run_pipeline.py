@@ -261,15 +261,22 @@ def run(args: argparse.Namespace) -> dict:
                 )
                 prev_snapshot = snapshot
                 if confirmer is not None:
-                    vlm_env = confirmer.maybe_confirm(
-                        engine.context,
-                        engine.current_step,
-                        frame,
-                        session_id=session_id,
-                        seq=seq,
-                        pts_ms=pts_ms,
-                        frame_idx=frame_idx,
-                    )
+                    # A VLM/network failure must never kill the session loop;
+                    # the engine simply proceeds without that evidence.
+                    try:
+                        vlm_env = confirmer.maybe_confirm(
+                            engine.context,
+                            engine.current_step,
+                            frame,
+                            session_id=session_id,
+                            seq=seq,
+                            pts_ms=pts_ms,
+                            frame_idx=frame_idx,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        vlm_env = None
+                        print(f"[{pts_ms:8.0f}ms] VLM ERROR (skipped): {exc}",
+                              file=sys.stderr)
                     if vlm_env is not None:
                         emit(vlm_env)
 
