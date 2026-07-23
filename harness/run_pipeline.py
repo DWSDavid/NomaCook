@@ -43,6 +43,7 @@ from server.pipeline.session import (
     create_run_dir,
     session_id_for,
 )
+from server.pipeline.render import AnnotatedVideoWriter, draw_overlay
 from server.pipeline.timeline import (
     KeyframeSampler,
     StateSnapshot,
@@ -63,6 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--run-tag", default=None)
     ap.add_argument("--max-frames", type=int, default=0)
     ap.add_argument("--k-frames", type=int, default=3, help="fusion debounce")
+    ap.add_argument("--render", action=argparse.BooleanOptionalAction, default=True)
     return ap
 
 
@@ -80,6 +82,13 @@ def run(args: argparse.Namespace) -> dict:
         raise SystemExit(f"cannot open video {video}")
     fps = capture.get(cv2.CAP_PROP_FPS) or 30.0
     frame_ms = 1000.0 / fps
+
+    width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    writer = (AnnotatedVideoWriter(paths.annotated, fps=fps,
+                                   frame_size=(width, height))
+              if args.render else None)
+    recent_event_texts: list[str] = []
 
     engine = StateEngine(
         session_id=session_id, recipe=recipe, started_at=SESSION_EPOCH
@@ -105,6 +114,10 @@ def run(args: argparse.Namespace) -> dict:
 
     def emit(envelope) -> None:
         nonlocal seq, det_ctx
+        if envelope.type == "perception.hand_object_relation":
+            recent_event_texts.append(
+                f"{envelope.payload.get('relation')} "
+                f"{envelope.payload.get('hand')}/{envelope.payload.get('object_class')}")
         log.append(envelope)
         result = engine.consume(envelope)
         seq += 1
@@ -241,12 +254,29 @@ def run(args: argparse.Namespace) -> dict:
                 )
                 prev_snapshot = snapshot
 
+            if writer is not None:
+                step = engine.current_step
+                draw_overlay(
+                    frame,
+                    detections=latest_canon,
+                    step_id=engine.context.current_step_id,
+                    instruction=step.instruction,
+                    score=engine.context.step_progress.score,
+                    threshold=step.completion_policy.threshold,
+                    pending_question=(engine.context.pending_question.question
+                                      if engine.context.pending_question else None),
+                    recent_events=recent_event_texts,
+                    color_text=(f"color={color_state}" if color_state else None),
+                )
+                writer.write(frame)
+
             frame_idx += 1
             if args.max_frames and frame_idx >= args.max_frames:
                 break
     finally:
         capture.release()
         hand_tracker.close()
+        writer and writer.close()
 
     meta = {
         "session_id": session_id,
@@ -259,6 +289,7 @@ def run(args: argparse.Namespace) -> dict:
         "final_step_id": engine.context.current_step_id,
         "final_status": engine.context.step_status,
         "wall_seconds": round(time.perf_counter() - wall_start, 2),
+        "annotated_frames": writer.frames_written if writer else 0,
         "args": {k: v for k, v in vars(args).items()},
     }
     paths.meta.write_text(
