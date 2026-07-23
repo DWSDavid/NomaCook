@@ -55,3 +55,11 @@ git commit -m "Phase 1: local perception layer (YOLO-World + MediaPipe + fusion 
 - holding 事件是否闭环(start + end):
 - 调整过的阈值:
 - session 日志路径:
+
+### 2026-07-23 Codex 实测
+
+- 日期/FPS: 2026-07-23；摄像头 source 0，1920×1080，300 帧端到端平均 16.47 FPS（`session_end.t - session_start.t = 18.211s`），达到 ≥10 FPS 要求。source 1 无法初始化，因此未切换。
+- holding 事件是否闭环(start + end): 未闭环。运行期间快照能看到手，但没有检测到 `bottle` 或 `bowl`，interaction 事件为 0；需要现场人员手持词表内瓶子或碗 1–2 秒后放下，重新完成该项。
+- 调整过的阈值: 无；`perception/hands.py` 的 `is_gripping` 阈值保持 0.55。实测手部 `grip_closure` 约 0.395–0.449，但由于同帧没有目标物检测，当前不能据此判断阈值应下调。
+- session 日志路径: `data/sessions/2026-07-23T12-10-34_session.jsonl`（Git 忽略）；共 6 行，已用 `.venv/bin/python` 逐行执行 `json.loads`，验证通过，并包含 `session_start`、4 个 `snapshot`、`session_end`。
+- 结果: FPS 与 JSONL 验收通过；holding start + end 仍待人工现场动作，Phase 1 live 验收未完全通过。
