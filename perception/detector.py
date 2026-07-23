@@ -62,9 +62,23 @@ class ObjectDetector:
         self.last_latency_ms: float = 0.0
 
     def set_vocab(self, vocab: list[str]) -> None:
-        if vocab != self.vocab:
-            self.vocab = list(vocab)
+        if vocab == self.vocab:
+            return
+        self.vocab = list(vocab)
+        try:
             self.model.set_classes(self.vocab)
+        except RuntimeError as exc:
+            if "MPS" not in str(exc):
+                raise
+            # Ultralytics re-encodes class prompts with CLIP on set_classes.
+            # After predict() has moved the model to MPS, that encode crashes
+            # with "Placeholder storage has not been allocated on MPS device!".
+            # Hop to CPU for the (rare, per-step-transition) re-encode, then
+            # move back — predict() does NOT restore the device on its own.
+            original = next(self.model.model.parameters()).device
+            self.model.model.to("cpu")
+            self.model.set_classes(self.vocab)
+            self.model.model.to(original)
 
     def detect(self, frame_bgr: np.ndarray) -> list[Detection]:
         t0 = time.perf_counter()
