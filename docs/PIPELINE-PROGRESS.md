@@ -30,4 +30,5 @@
 - [x] Wave 5 通过(Task 8 + 9;manager 裁定:①Task 9 commit 带入 runner 插入的纠缠不重写历史,以组合态验收;②Codex 的 received_at=t_server_for 偏离采纳,修复了固定 epoch 与真实 TTL 的矛盾,live 化时切回真实时钟,2026-07-23)
 - [x] 终验矩阵 7/7 通过(manager,2026-07-23):54 passed 含 e2e;final_1/final_2 `equal`;script 模式 4 transitions + final=completed + report 齐全;标注 MP4 45/45 帧可读、keyframes 3 张原始帧;真实 Gemini VLM 1 次调用 accepted 入流(band script 顶分触发);clean_sessions --all 清空 10 个 run 目录。
   过程中发现并修复两个真 bug(manager 直改):①server/vlm/client.py 传 pydantic 模型作 response_schema 被 Gemini 400 拒(additionalProperties),改为显式 types.Schema;②runner 的 VLM 调用未隔离异常会炸掉整个 session 循环,已加 try/except 降级继续。
-- [ ] Wave 6 通过(Task 10 骨架叠加 + Task 11 解说配音;2026-07-23 追加,前置:用户 brew install ffmpeg)
+- [x] Wave 6 通过(Task 10 + 11;manager 收官 2026-07-23:ffmpeg 装妥后在真实视频 test2.mov 上产出 annotated_narrated.mp4,ffprobe 验证 mpeg4+aac 双流,配音含 intro + question 两条真实台词)
+- [x] 首次真实素材验收(manager,2026-07-23,test2.mov 128s 网络做菜视频):YOLO 真实检出 tomato/egg/bowl/cutting_board;362 条手物交互事件;7 条三物同框 presence;11 次真实 Gemini VLM 调用全部 schema accepted 且判词与画面一致;提问机制真实触发。首个真实校准:prep_objects min_confidence 0.65→0.35(实测联合置信度 0.38-0.41)。遗留裁定项:step_01 料齐(0.3)+口头确认(0.3)=0.6 仍低于阈值 0.7,低风险步骤的确认权重待裁定。
