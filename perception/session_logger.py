@@ -1,5 +1,9 @@
 """JSONL session logger — the embryo of the Supabase `step_events` table.
 
+DEPRECATED for pipeline use: harness/run_pipeline.py writes validated
+EventEnvelope JSONL via server.events; this legacy flat format remains only
+for harness/live_perception.py webcam smoke runs.
+
 One file per live session under data/sessions/. Every line is one JSON event:
 session_start / session_end, interaction events, and periodic snapshots of all
 detections (for offline threshold tuning and replay).

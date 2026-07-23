@@ -65,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--max-frames", type=int, default=0)
     ap.add_argument("--k-frames", type=int, default=3, help="fusion debounce")
     ap.add_argument("--render", action=argparse.BooleanOptionalAction, default=True)
+    ap.add_argument("--vlm", choices=["off", "gemini"], default="off")
     return ap
 
 
@@ -100,6 +101,12 @@ def run(args: argparse.Namespace) -> dict:
     controller.sync(det_ctx)
     hand_tracker = HandTracker()
     fusion = InteractionTracker(k_frames=args.k_frames)
+    confirmer = None
+    if args.vlm == "gemini":
+        from server.pipeline.vlm_hook import VLMConfirmer
+        from server.vlm.client import GeminiVLMClient
+
+        confirmer = VLMConfirmer(GeminiVLMClient())
     sampler = KeyframeSampler(interval_ms=args.keyframe_interval * 1000.0)
     script = load_script(args.script) if args.script else []
     script_cursor = 0
@@ -253,6 +260,18 @@ def run(args: argparse.Namespace) -> dict:
                     ),
                 )
                 prev_snapshot = snapshot
+                if confirmer is not None:
+                    vlm_env = confirmer.maybe_confirm(
+                        engine.context,
+                        engine.current_step,
+                        frame,
+                        session_id=session_id,
+                        seq=seq,
+                        pts_ms=pts_ms,
+                        frame_idx=frame_idx,
+                    )
+                    if vlm_env is not None:
+                        emit(vlm_env)
 
             if writer is not None:
                 step = engine.current_step
@@ -290,11 +309,14 @@ def run(args: argparse.Namespace) -> dict:
         "final_status": engine.context.step_status,
         "wall_seconds": round(time.perf_counter() - wall_start, 2),
         "annotated_frames": writer.frames_written if writer else 0,
+        "vlm_mode": args.vlm,
         "args": {k: v for k, v in vars(args).items()},
     }
     paths.meta.write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    from server.pipeline.report import write_report
+    print(f"report -> {write_report(paths)}")
     print(
         f"frames={frame_idx} events={len(log)} "
         f"transitions={len(transitions)} final={meta['final_status']}"
