@@ -677,7 +677,7 @@ def scripted_event(row: dict, index: int, *, session_id: str, seq: int,
     raise ValueError(f"unsupported scripted event type {row['type']!r}")
 ```
 
-注意 `load_script` 返回 `list[(原始行号, row)]`,与测试无关但 Task 5 会用;如实现时觉得返回类型别扭,可改为返回 `list[dict]` 且给每行注入 `"_index"`,并同步修改 Task 5 的用法,二选一,在 PROGRESS 里注明。
+**已裁定(Wave 2)**:`load_script` 返回 `list[dict]`,每行注入 `"_index"`(原始行号),按 `pts_ms` 再按 `_index` 稳定排序;Task 5 的消费代码已同步为此形式。
 
 - [ ] **Step 4: 跑测试确认通过 + 引擎联动冒烟**
 
@@ -1062,12 +1062,12 @@ def run(args: argparse.Namespace) -> dict:
             ):
                 emit(interaction_event(ev, session_id=session_id, seq=seq))
 
-            while script_cursor < len(script) and script[script_cursor][1]["pts_ms"] <= pts_ms:
-                index, row = script[script_cursor]
+            while script_cursor < len(script) and script[script_cursor]["pts_ms"] <= pts_ms:
+                row = script[script_cursor]
                 pending = engine.context.pending_question
                 question_ref = (pending.triggered_by_event_id if pending else None)
-                emit(scripted_event(row, index, session_id=session_id, seq=seq,
-                                    question_event_id=question_ref))
+                emit(scripted_event(row, row["_index"], session_id=session_id,
+                                    seq=seq, question_event_id=question_ref))
                 script_cursor += 1
 
             if sampler.due(pts_ms):
