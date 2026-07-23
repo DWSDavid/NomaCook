@@ -15,23 +15,15 @@ import numpy as np
 
 from ultralytics import YOLOWorld
 
+from perception.kitchen_vocab import vocab_for_step
+
 # Default kitchen vocabulary for a fried-rice-class dish. In the real flow the
 # vocab comes from the current SOP step's `objects_involved` (English only —
-# YOLO-World's text encoder is English CLIP).
-DEFAULT_VOCAB = [
-    "wok",
-    "frying pan",
-    "spatula",
-    "cutting board",
-    "kitchen knife",
-    "bowl",
-    "plate",
-    "cup",
-    "bottle",
-    "egg",
-    "scallion",
-    "garlic",
-]
+# YOLO-World's text encoder is English CLIP), expanded via
+# kitchen_vocab.vocab_for_step().
+DEFAULT_VOCAB = vocab_for_step(
+    ["spatula", "cutting board", "knife", "bowl", "plate", "bottle", "egg", "scallion", "garlic"]
+)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_WEIGHTS = _REPO_ROOT / "yolov8s-worldv2.pt"

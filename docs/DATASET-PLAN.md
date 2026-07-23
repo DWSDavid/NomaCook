@@ -18,3 +18,14 @@
 
 - [ ] EPIC-KITCHENS / VISOR：从 [EPIC-KITCHENS 2025 challenge 页面](https://epic-kitchens.github.io/2025) 进入对应 Codabench 和团队注册表。官方要求有效的机构邮箱并人工审核；本轮不代注册。VISOR 公共标注下载入口在 [VISOR 官网](https://epic-kitchens.github.io/VISOR/site)，但因 CC BY-NC 4.0 本项目不下载、不进产品。
 - [ ] OpenDataLab（下厨房语料）：从 [OpenDataLab 数据集入口](https://opendatalab.com/home) 登录后搜索“下厨房/中文菜谱”。下载前必须由人工核对平台元数据、原作者授权和可用范围；当前来源权属不清，不得商用或进入产品。
+
+### Track C 候选：YOLO-World 厨房词表离线评测集（2026-07-23 登记，均未下载）
+
+> 用途仅限**离线评测词表召回/调 conf 阈值**。YOLO-World 零训练，不存在“训练集”；
+> 唯一可进产品的数据仍是自采第一人称视频抽帧。以下任何一项下载前先补全上表登记并人工复核 license。
+
+- [ ] **Open Images V7 厨房类子集**：含 Frying pan / Spatula / Kitchen knife / Mixing bowl / Gas stove 等类目。标注 CC BY 4.0；图片为 Flickr CC BY 2.0 但需逐图确认，历史上有个别争议。入口：[Open Images 官网](https://storage.googleapis.com/openimages/web/index.html)。评测用途风险低，优先级最高。
+- [ ] **LVIS v1**：1200+ 类长尾词表，厨房器具类目丰富，天生适合开放词表评测。标注 CC BY 4.0，图片沿用 COCO（Flickr 授权混合）。入口：[lvisdataset.org](https://www.lvisdataset.org/)。
+- [ ] **CaptainCook4D 抽帧**：已在上表登记（官网称 Apache-2.0），程序性做菜第一人称视频，与我们场景最接近。若人工批准下载，抽帧后可同时喂 eval_vocab 和状态机误推进评估，一份数据两用。
+- [ ] **EGTEA Gaze+**：第一人称做菜视频（28 小时），研究用途授权，**research-only 永不进产品**。入口：[EGTEA 官网](https://cbs.ic.gatech.edu/fpv/)。仅当自采+上述三项仍不够时考虑。
+- [ ] **Roboflow Universe 厨房/餐具数据集**：社区标注，License 逐数据集不同（多为 CC BY 4.0），质量参差。搜索关键词 kitchen utensils / cooking。仅作词表 rephrasing 灵感与快速 sanity check，逐个登记后再用。

@@ -12,27 +12,16 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from ultralytics import YOLOWorld
 
-# Kitchen vocabulary for a fried-rice-class dish. This is the per-step
-# objects_involved list from the SOP, in English (YOLO-World's text encoder
-# is English CLIP; SOP schema should store English object names).
-KITCHEN_VOCAB = [
-    "wok",
-    "frying pan",
-    "spatula",
-    "cutting board",
-    "kitchen knife",
-    "bowl",
-    "plate",
-    "egg",
-    "soy sauce bottle",
-    "oil bottle",
-    "scallion",
-    "garlic",
-    "rice",
-    "hand",
-]
+from perception.kitchen_vocab import full_vocab
+
+# Full kitchen vocabulary (perception/kitchen_vocab.py is the single source
+# of truth). Production uses per-step vocab_for_step(); the smoke test runs
+# the whole list to see what fires.
+KITCHEN_VOCAB = full_vocab()
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "data" / "test_frames"
 
