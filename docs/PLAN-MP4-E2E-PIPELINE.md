@@ -1847,6 +1847,406 @@ git commit -m "pipeline: per-run markdown report + legacy logger deprecation not
 - [x] `harness/clean_sessions.py --all` 能一键清空所有 run 产物
 - [x] 标注 MP4 可播放,帧数与输入一致,关键帧 jpg 是无标注原始帧
 
+## Wave 6(2026-07-23 追加):成品演示视频 = 骨架叠加 + 解说配音
+
+> 目标:`--narrate say|gemini` 一个开关,让任何一次 run 额外产出
+> `annotated_narrated.mp4`(检测框 + 手部骨架 + 步骤横幅 + **中文解说音轨**)。
+> 解说内容来自事件流本身(开场、每次步骤完成、卡步提问、全部完成),
+> 所以以后任何 cooking recording 跑一遍管线就自动出片。
+>
+> **用户前置(人工,一条命令):`brew install ffmpeg`**(混流必需;测试对
+> ffmpeg 缺失一律 skip,不许 fail)。
+> 确定性说明:配音只消费 narration.json 与 annotated.mp4,不触碰
+> events.jsonl,原有确定性保证不受影响;TTS 输出本身声明为非确定性产物。
+> 波次分工:Task 10 = OpenCode(只碰 render.py 及其测试);
+> Task 11 = Codex(narrate.py + runner 接线,含把 hands 传给 draw_overlay)。
+> 两者文件零交集,可并行。
+
+### Task 10: 手部骨架叠加(OpenCode)
+
+**Files:**
+- Modify: `server/pipeline/render.py`
+- Test: `tests/test_pipeline_render.py`(追加,不改已有用例)
+
+**Interfaces:**
+- `draw_overlay` 增加 keyword-only 参数 `hands: Sequence = ()`,默认空保持全部现有调用点兼容。元素按 `perception.hands.HandState` 鸭子类型:`.landmarks_px`(N×2 ndarray)、`.handedness`、`.grip_closure`、`.is_gripping`。
+
+- [ ] **Step 1: 追加失败测试**(加到 `tests/test_pipeline_render.py` 末尾)
+
+```python
+def test_draw_overlay_renders_hand_skeleton():
+    import numpy as np
+    from dataclasses import dataclass, field
+
+    @dataclass(frozen=True)
+    class FakeHand:
+        landmarks_px: np.ndarray = field(
+            default_factory=lambda: np.array(
+                [[60.0 + 4 * i, 120.0 + 3 * i] for i in range(21)]))
+        handedness: str = "Right"
+        grip_closure: float = 0.61
+        is_gripping: bool = True
+
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+    before = frame.copy()
+    draw_overlay(
+        frame, detections=[], step_id="step_01_prepare", instruction="x",
+        score=0.0, threshold=0.7, pending_question=None,
+        recent_events=[], color_text=None, hands=[FakeHand()],
+    )
+    assert (frame != before).any()
+
+
+def test_draw_overlay_without_hands_still_works():
+    import numpy as np
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+    draw_overlay(
+        frame, detections=[], step_id="s", instruction="x", score=0.0,
+        threshold=0.7, pending_question=None, recent_events=[], color_text=None,
+    )
+```
+
+- [ ] **Step 2: 跑测试确认第一条失败**(`unexpected keyword argument 'hands'`)
+
+Run: `.venv/bin/python -m pytest tests/test_pipeline_render.py -v`
+
+- [ ] **Step 3: 实现**
+
+`render.py` 顶部加骨架边(取自 harness/live_perception.py,同一套):
+
+```python
+HAND_EDGES = [
+    (0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8),
+    (5, 9), (9, 10), (10, 11), (11, 12), (9, 13), (13, 14), (14, 15), (15, 16),
+    (13, 17), (17, 18), (18, 19), (19, 20), (0, 17),
+]
+HAND_COLOR = (255, 160, 0)
+```
+
+`draw_overlay` 签名加 `hands: Sequence = ()`(放在 `color_text` 之后),函数体
+在检测框绘制之后追加:
+
+```python
+    for hand in hands:
+        pts = hand.landmarks_px.astype(int)
+        for a, b in HAND_EDGES:
+            cv2.line(frame_bgr, tuple(pts[a]), tuple(pts[b]), HAND_COLOR, 1)
+        for p in pts:
+            cv2.circle(frame_bgr, tuple(p), 2, HAND_COLOR, -1)
+        x1, y1 = pts.min(axis=0)
+        state = "GRIP" if hand.is_gripping else "open"
+        cv2.putText(frame_bgr,
+                    f"{hand.handedness} {state} {hand.grip_closure:.2f}",
+                    (int(x1), max(70, int(y1) - 6)), _FONT, 0.5, HAND_COLOR, 1)
+```
+
+- [ ] **Step 4: 全量回归 + Commit**
+
+Run: `.venv/bin/python -m pytest tests/ -q -m "not e2e"` → 0 failed
+
+```bash
+git add server/pipeline/render.py tests/test_pipeline_render.py
+git commit -m "pipeline: hand skeleton overlay in annotated video"
+```
+
+### Task 11: 解说配音音轨 + runner 接线(Codex)
+
+**Files:**
+- Create: `server/pipeline/narrate.py`
+- Modify: `harness/run_pipeline.py`
+- Test: `tests/test_pipeline_narrate.py`
+
+**Interfaces:**
+- Consumes: run 目录内 `annotated.mp4` 与本 Task 新增的 `narration.json`;Task 10 的 `hands=` 参数。
+- Produces:
+  - narration item 构造器(纯函数,均返回 `{"pts_ms": float, "kind": str, "text": str}`):
+    `intro_item(recipe) -> dict`、`transition_item(recipe, completed_step_id, next_step_id, pts_ms) -> dict`、
+    `question_item(question: str, pts_ms: float) -> dict`、`complete_item(pts_ms: float) -> dict`
+  - `schedule(items: list[dict], durations_ms: list[float], gap_ms: float = 300.0) -> list[float]`
+    (纯函数:第 i 条起播 = max(item.pts_ms, 上一条结束 + gap_ms))
+  - `synthesize_say(text: str, out_path: Path, voice: str = "Tingting") -> None`(macOS `say -v <voice> -o <aiff>`;voice 不存在时报错并列出 `say -v '?'` 提示)
+  - `synthesize_gemini(text: str, out_path: Path) -> None`(google-genai TTS,`GEMINI_TTS_MODEL` 环境变量,默认 `gemini-3.1-flash-tts-preview`,24kHz 16-bit mono wav;import 必须放函数体内,off/say 模式不加载 google.genai)
+  - `narrate_run(run_root: Path, backend: str, voice: str = "Tingting") -> Path`
+    (读 `run_root/narration.json`,逐条合成到 `run_root/narration_clips/`,ffprobe 探时长,schedule 排期,ffmpeg adelay+amix 混轨并与 annotated.mp4 封装为 `run_root/annotated_narrated.mp4`;**ffmpeg/ffprobe 不存在时抛 RuntimeError,message 里写明 `brew install ffmpeg`**)
+
+- [ ] **Step 1: 写失败测试**
+
+```python
+# tests/test_pipeline_narrate.py
+from __future__ import annotations
+
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from server.engine import load_recipe
+from server.pipeline.narrate import (
+    complete_item,
+    intro_item,
+    question_item,
+    schedule,
+    synthesize_say,
+    transition_item,
+)
+
+RECIPE = load_recipe("sop/tomato_egg.json")
+
+
+def test_items_carry_pts_kind_and_chinese_text():
+    intro = intro_item(RECIPE)
+    assert intro["pts_ms"] == 0.0 and intro["kind"] == "intro"
+    assert "番茄炒鸡蛋" in intro["text"] and RECIPE.steps[0].instruction in intro["text"]
+
+    tr = transition_item(RECIPE, "step_01_prepare", "step_02_scramble_egg", 600.0)
+    assert tr["pts_ms"] == 600.0 and tr["kind"] == "step"
+    assert RECIPE.steps[1].instruction in tr["text"]
+
+    q = question_item("番茄切好了吗？", 900.0)
+    assert q["kind"] == "question" and q["text"] == "番茄切好了吗？"
+
+    done = complete_item(2400.0)
+    assert done["kind"] == "complete" and done["pts_ms"] == 2400.0
+
+
+def test_schedule_shifts_overlapping_items_but_keeps_early_starts():
+    items = [{"pts_ms": 0.0}, {"pts_ms": 1000.0}, {"pts_ms": 9000.0}]
+    starts = schedule(items, durations_ms=[3000.0, 2000.0, 1000.0], gap_ms=300.0)
+    assert starts == [0.0, 3300.0, 9000.0]
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or shutil.which("say") is None,
+    reason="macOS say unavailable")
+def test_say_synthesizes_playable_clip(tmp_path: Path):
+    out = tmp_path / "clip.aiff"
+    synthesize_say("你好", out)
+    assert out.stat().st_size > 1000
+```
+
+- [ ] **Step 2: 跑测试确认失败** → 模块不存在
+
+- [ ] **Step 3: 实现 `server/pipeline/narrate.py`**
+
+```python
+"""Turn one run's narration.json into a mixed Chinese voice track and mux it."""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+
+def intro_item(recipe) -> dict:
+    first = recipe.steps[0]
+    return {"pts_ms": 0.0, "kind": "intro",
+            "text": f"开始制作{recipe.dish}。第一步，{first.instruction}"}
+
+
+def transition_item(recipe, completed_step_id: str, next_step_id: str,
+                    pts_ms: float) -> dict:
+    steps = {step.id: step for step in recipe.steps}
+    return {"pts_ms": pts_ms, "kind": "step",
+            "text": f"这一步完成了。下一步，{steps[next_step_id].instruction}"}
+
+
+def question_item(question: str, pts_ms: float) -> dict:
+    return {"pts_ms": pts_ms, "kind": "question", "text": question}
+
+
+def complete_item(pts_ms: float) -> dict:
+    return {"pts_ms": pts_ms, "kind": "complete",
+            "text": "全部步骤完成，可以盛盘上桌了。妈，我会做饭了。"}
+
+
+def schedule(items: list[dict], durations_ms: list[float],
+             gap_ms: float = 300.0) -> list[float]:
+    starts: list[float] = []
+    cursor = 0.0
+    for item, duration in zip(items, durations_ms):
+        start = max(float(item["pts_ms"]), cursor)
+        starts.append(start)
+        cursor = start + duration + gap_ms
+    return starts
+
+
+def synthesize_say(text: str, out_path: Path, voice: str = "Tingting") -> None:
+    result = subprocess.run(
+        ["say", "-v", voice, "-o", str(out_path), text],
+        capture_output=True, text=True)
+    if result.returncode != 0 or not out_path.exists():
+        raise RuntimeError(
+            f"say failed for voice {voice!r}: {result.stderr.strip()}; "
+            "list voices with: say -v '?'")
+
+
+def synthesize_gemini(text: str, out_path: Path) -> None:
+    import wave
+
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    model = os.getenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview")
+    response = client.models.generate_content(
+        model=model, contents=text,
+        config=types.GenerateContentConfig(response_modalities=["AUDIO"]))
+    part = response.candidates[0].content.parts[0]
+    pcm = part.inline_data.data
+    with wave.open(str(out_path), "wb") as stream:
+        stream.setnchannels(1)
+        stream.setsampwidth(2)
+        stream.setframerate(24_000)
+        stream.writeframes(pcm)
+    client.close()
+
+
+def _require_ffmpeg() -> None:
+    for tool in ("ffmpeg", "ffprobe"):
+        if shutil.which(tool) is None:
+            raise RuntimeError(
+                f"{tool} not found; install it first: brew install ffmpeg")
+
+
+def _duration_ms(clip: Path) -> float:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=nw=1:nk=1", str(clip)],
+        capture_output=True, text=True, check=True)
+    return float(out.stdout.strip()) * 1000.0
+
+
+def narrate_run(run_root: Path, backend: str, voice: str = "Tingting") -> Path:
+    _require_ffmpeg()
+    items = json.loads((run_root / "narration.json").read_text(encoding="utf-8"))
+    if not items:
+        raise RuntimeError("narration.json is empty; nothing to narrate")
+    clips_dir = run_root / "narration_clips"
+    clips_dir.mkdir(exist_ok=True)
+
+    clips: list[Path] = []
+    for i, item in enumerate(items):
+        if backend == "say":
+            clip = clips_dir / f"clip_{i:03d}.aiff"
+            synthesize_say(item["text"], clip, voice=voice)
+        elif backend == "gemini":
+            clip = clips_dir / f"clip_{i:03d}.wav"
+            synthesize_gemini(item["text"], clip)
+        else:
+            raise ValueError(f"unknown narrate backend {backend!r}")
+        clips.append(clip)
+
+    starts = schedule(items, [_duration_ms(c) for c in clips])
+    inputs: list[str] = ["-i", str(run_root / "annotated.mp4")]
+    filters: list[str] = []
+    labels: list[str] = []
+    for i, (clip, start) in enumerate(zip(clips, starts)):
+        inputs += ["-i", str(clip)]
+        delay = max(0, int(round(start)))
+        filters.append(f"[{i + 1}:a]adelay={delay}|{delay}[a{i}]")
+        labels.append(f"[a{i}]")
+    filters.append(
+        "".join(labels) + f"amix=inputs={len(clips)}:normalize=0[mix]")
+    out_path = run_root / "annotated_narrated.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", *inputs, "-filter_complex", ";".join(filters),
+         "-map", "0:v", "-map", "[mix]", "-c:v", "copy", "-c:a", "aac",
+         str(out_path)],
+        capture_output=True, text=True, check=True)
+    return out_path
+```
+
+- [ ] **Step 4: runner 接线**(`harness/run_pipeline.py`,改动点全列,别处不动)
+
+1. import 区加(纯函数,无重依赖):
+
+```python
+from server.pipeline.narrate import (
+    complete_item, intro_item, question_item, transition_item,
+)
+```
+
+2. `build_parser` 加:
+
+```python
+    ap.add_argument("--narrate", choices=["off", "say", "gemini"], default="off")
+    ap.add_argument("--voice", default="Tingting", help="say backend voice")
+```
+
+3. `run()` 初始化区(engine 建好后):
+
+```python
+    narration: list[dict] = [intro_item(recipe)]
+    last_question: str | None = None
+```
+
+4. `emit()` 内:transition 分支里(打印 STEP DONE 处)加:
+
+```python
+            if result.transition.next_step_id is not None:
+                narration.append(transition_item(
+                    recipe, result.transition.completed_step_id,
+                    result.transition.next_step_id, envelope.t_device_ms))
+            else:
+                narration.append(complete_item(envelope.t_device_ms))
+            last_question = None
+```
+
+question_pending 分支里加:
+
+```python
+            q = engine.context.pending_question
+            if q is not None and q.question != last_question:
+                narration.append(question_item(q.question, envelope.t_device_ms))
+                last_question = q.question
+```
+
+(`narration`、`last_question` 与 `transitions` 同法用 `nonlocal` 捕获。)
+
+5. meta 写盘前:
+
+```python
+    (paths.root / "narration.json").write_text(
+        json.dumps(narration, ensure_ascii=False, indent=2), encoding="utf-8")
+```
+
+meta 加 `"narrate_mode": args.narrate`。
+
+6. meta/report 写完后,与 VLM 同样的异常隔离风格:
+
+```python
+    if args.narrate != "off":
+        try:
+            from server.pipeline.narrate import narrate_run
+            print(f"narrated -> {narrate_run(paths.root, args.narrate, args.voice)}")
+        except Exception as exc:
+            print(f"NARRATE ERROR (video kept, narration skipped): {exc}")
+```
+
+- [ ] **Step 5: 验收 + Commit**
+
+Run: `.venv/bin/python -m pytest tests/ -q -m "not e2e"` → 0 failed
+实机验收(say 后端,不需要任何 key;ffmpeg 已装的前提下):
+
+```bash
+.venv/bin/python harness/run_pipeline.py --source data/test_videos/synthetic_smoke.mp4 --device cpu --script tests/fixtures/tomato_egg_full_script.json --run-tag narrate_a --max-frames 120 --narrate say
+```
+
+Expected:末尾打印 `narrated -> .../annotated_narrated.mp4`;QuickTime 播放能听到
+开场 + 4 次步骤播报;`narration.json` 有 6 条(intro + 3 step + 1 complete +
+0-1 question)。ffmpeg 未安装时打印 NARRATE ERROR 且其余产物完好,退出码 0。
+把实测输出贴进 PROGRESS。
+
+```bash
+git add server/pipeline/narrate.py harness/run_pipeline.py tests/test_pipeline_narrate.py
+git commit -m "pipeline: narration voice track (say/gemini tts) muxed into annotated video"
+```
+
 ## 计划外但已知的后续(不在本计划做,防止 scope 蔓延)
 
 1. **真实做菜视频验收(用户人工):** 按 `data/README.md` 录一段真番茄炒蛋第一人称视频,跑 `--vlm gemini --device mps`,人工看 report 和 annotated.mp4,把阈值调整记录进 PROGRESS。这是本计划产出的第一个真实用途。
