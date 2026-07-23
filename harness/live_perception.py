@@ -92,6 +92,8 @@ def main() -> None:
         sys.exit(f"cannot open source: {args.source}")
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps_src = cap.get(cv2.CAP_PROP_FPS)
+    frame_ms = 1000.0 / fps_src if fps_src and fps_src > 0 else None
 
     logger = SessionLogger(
         meta={"source": str(args.source), "vocab": vocab, "resolution": [w, h]}
@@ -113,10 +115,12 @@ def main() -> None:
 
             if frame_idx % DETECT_EVERY == 0:
                 detections = detector.detect(frame)
-            hands = hand_tracker.detect(frame)
+            pts_ms = frame_idx * frame_ms if frame_ms else None
+            hands = hand_tracker.detect(frame, timestamp_ms=pts_ms)
 
             events = fusion.update(
-                t=now, frame=frame_idx,
+                t=(pts_ms / 1000.0) if pts_ms is not None else now,
+                frame=frame_idx,
                 hands=[(hs.handedness, hs.palm_center, hs.box, hs.is_gripping)
                        for hs in hands],
                 detections=[(d.label, d.conf, d.box) for d in detections],

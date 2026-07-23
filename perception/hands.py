@@ -9,6 +9,7 @@ Same contract as detector.py: ndarray in, dataclasses out, no GUI.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -85,11 +86,19 @@ class HandTracker:
         self._landmarker = vision.HandLandmarker.create_from_options(options)
         self._ts_ms = 0
 
-    def detect(self, frame_bgr: np.ndarray) -> list[HandState]:
+    def detect(
+        self, frame_bgr: np.ndarray, timestamp_ms: float | None = None
+    ) -> list[HandState]:
         h, w = frame_bgr.shape[:2]
         rgb = np.ascontiguousarray(frame_bgr[:, :, ::-1])
         image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        self._ts_ms += 33  # nominal 30 fps clock; only monotonicity matters
+        if timestamp_ms is None:
+            self._ts_ms += 33  # legacy webcam path: nominal 30 fps clock
+        else:
+            # Real frame time from the caller; Tasks API only needs strict
+            # monotonic int milliseconds, so ceil and bump on collisions.
+            candidate = int(math.ceil(timestamp_ms))
+            self._ts_ms = max(candidate, self._ts_ms + 1)
         result = self._landmarker.detect_for_video(image, self._ts_ms)
 
         states: list[HandState] = []
@@ -106,6 +115,10 @@ class HandTracker:
                 )
             )
         return states
+
+    @property
+    def last_timestamp_ms(self) -> int:
+        return self._ts_ms
 
     def close(self) -> None:
         self._landmarker.close()
