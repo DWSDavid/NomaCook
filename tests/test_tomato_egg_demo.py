@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
+import pytest
 
 from server.engine import StateEngine, load_recipe
 from server.engine.models import SessionContext
@@ -122,5 +123,11 @@ def test_yellow_roi_signal_is_only_partial_evidence_for_cooked_egg() -> None:
     )
     result = engine.consume(color_event)
     assert result.status == "evidence_added"
-    assert result.context.step_progress.score == 0.3
+    step2 = next(s for s in engine.recipe.steps if s.id == "step_02_scramble_egg")
+    yellow_rule = next(
+        r for r in step2.completion_policy.evidence_rules if r.id == "egg_yellow_roi"
+    )
+    assert result.context.step_progress.score == pytest.approx(yellow_rule.weight)
+    # The point under test: yellow ROI alone must stay below the threshold.
+    assert yellow_rule.weight < step2.completion_policy.threshold
     assert result.context.current_step_id == "step_02_scramble_egg"
