@@ -1,0 +1,217 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "NomaChef: Context YOLO (Camera 0)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "server.perception.live_context_demo",
+      "args": [
+        "--source",
+        "0"
+      ],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "NomaChef: Context YOLO (Camera 1)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "server.perception.live_context_demo",
+      "args": [
+        "--source",
+        "1"
+      ],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "NomaChef: Tomato Egg Signals (Camera 0)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "server.perception.live_context_demo",
+      "args": [
+        "--source",
+        "0",
+        "--step",
+        "${input:tomatoStep}",
+        "--color-signals"
+      ],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "NomaChef: YOLO + MediaPipe (Camera 0)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/harness/live_perception.py",
+      "args": [
+        "--source",
+        "0"
+      ],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "NomaChef: YOLO + MediaPipe (Camera 1)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/harness/live_perception.py",
+      "args": [
+        "--source",
+        "1"
+      ],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "NomaChef: Gemini Live (Camera 0)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "server.voice.live_scene_demo",
+      "args": [
+        "--source",
+        "0"
+      ],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "NomaChef: Gemini Live (Camera 1)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "server.voice.live_scene_demo",
+      "args": [
+        "--source",
+        "1"
+      ],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "NomaChef: Gemini Vision-Only Smoke",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "server.voice.live_scene_demo",
+      "args": [
+        "--source",
+        "0",
+        "--no-microphone",
+        "--no-speaker",
+        "--duration",
+        "20"
+      ],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "NomaChef: Offline MP4 — YOLO + MediaPipe",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/harness/live_perception.py",
+      "args": [
+        "--source",
+        "${input:videoPath}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "NomaChef: Offline MP4 — Context YOLO",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "server.perception.live_context_demo",
+      "args": [
+        "--source",
+        "${input:videoPath}",
+        "--step",
+        "${input:tomatoStep}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "NomaChef: Debug Current Python File",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ],
+  "inputs": [
+    {
+      "id": "videoPath",
+      "type": "promptString",
+      "description": "MP4 path, relative to the NomaChef repository or absolute",
+      "default": "data/test_videos/synthetic_smoke.mp4"
+    },
+    {
+      "id": "tomatoStep",
+      "type": "pickString",
+      "description": "Tomato-and-egg SOP step",
+      "options": [
+        "step_01_prepare",
+        "step_02_scramble_egg",
+        "step_03_soften_tomato",
+        "step_04_combine_and_plate"
+      ],
+      "default": "step_01_prepare"
+    }
+  ]
+}
