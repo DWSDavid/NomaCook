@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nomachef.local/schemas/sop-1.0.json",
+  "title": "NomaChef frozen recipe SOP",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "recipe_version_id", "dish", "ingredients", "steps"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "recipe_version_id": {"type": "string", "minLength": 1},
+    "dish": {"type": "string", "minLength": 1},
+    "language": {"type": "string", "default": "zh-CN"},
+    "ingredients": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "amount"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "amount": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/step"}
+    }
+  },
+  "$defs": {
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "sequence", "instruction", "objects_involved", "completion_check",
+        "est_duration_sec", "check_policy", "completion_policy"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "sequence": {"type": "integer", "minimum": 1},
+        "instruction": {"type": "string", "minLength": 1},
+        "objects_involved": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "completion_check": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A static, visually decidable end state; never an action instruction."
+        },
+        "est_duration_sec": {"type": "integer", "minimum": 1},
+        "check_policy": {
+          "enum": ["continuous_evidence", "timer_then_visual", "visual_then_confirm", "user_confirm"]
+        },
+        "tips": {"type": "array", "items": {"type": "string"}},
+        "failure_modes": {"type": "array", "items": {"type": "string"}},
+        "high_risk": {"type": "boolean", "default": false},
+        "completion_policy": {"$ref": "#/$defs/completionPolicy"}
+      }
+    },
+    "completionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "threshold", "consecutive_hits", "question_min_score", "question_after_ms",
+        "question", "evidence_rules"
+      ],
+      "properties": {
+        "threshold": {"type": "number", "minimum": 0, "maximum": 1},
+        "consecutive_hits": {"type": "integer", "minimum": 1},
+        "question_min_score": {"type": "number", "minimum": 0, "maximum": 1},
+        "question_after_ms": {"type": "integer", "minimum": 0},
+        "question": {"type": "string", "minLength": 1},
+        "evidence_rules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/evidenceRule"}
+        }
+      }
+    },
+    "evidenceRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "event_type", "payload_matches", "weight", "min_confidence"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "event_type": {"type": "string", "minLength": 1},
+        "payload_matches": {"type": "object"},
+        "weight": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "min_confidence": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    }
+  }
+}

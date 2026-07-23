@@ -1,0 +1,137 @@
+{
+  "schema_version": "1.0",
+  "recipe_version_id": "rv_fried_rice_demo_1",
+  "dish": "蛋炒饭",
+  "language": "zh-CN",
+  "ingredients": [
+    {"name": "冷饭", "amount": "500 ml"},
+    {"name": "鸡蛋", "amount": "2 个"},
+    {"name": "火腿、胡萝卜或黄瓜丁", "amount": "各约 30 g，可选"},
+    {"name": "食用油", "amount": "12 ml"},
+    {"name": "盐、胡椒粉、生抽", "amount": "适量"},
+    {"name": "香葱", "amount": "1 根"}
+  ],
+  "steps": [
+    {
+      "id": "step_01_prepare",
+      "sequence": 1,
+      "instruction": "把米饭铲散，配菜切成小丁，鸡蛋打入碗中并搅匀。",
+      "objects_involved": ["rice", "egg", "bowl", "cutting board", "kitchen knife"],
+      "completion_check": "米饭已基本散开，配菜为小丁，碗中的蛋液颜色均匀。",
+      "est_duration_sec": 240,
+      "check_policy": "visual_then_confirm",
+      "tips": ["冷饭更容易炒到粒粒分明。"],
+      "failure_modes": ["大块米饭未铲散，后续容易受热不均。"],
+      "high_risk": false,
+      "completion_policy": {
+        "threshold": 0.7,
+        "consecutive_hits": 2,
+        "question_min_score": 0.4,
+        "question_after_ms": 30000,
+        "question": "米饭、配菜和蛋液都准备好了吗？",
+        "evidence_rules": [
+          {"id": "prep_objects", "event_type": "perception.objects_present", "payload_matches": {"step_id": "step_01_prepare", "state": "ready"}, "weight": 0.4, "min_confidence": 0.65},
+          {"id": "prep_visual", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_01_prepare", "phase": "likely_complete"}, "weight": 0.3, "min_confidence": 0.7},
+          {"id": "prep_confirm", "event_type": "voice.user_confirmation", "payload_matches": {"step_id": "step_01_prepare", "confirmed": true}, "weight": 0.3, "min_confidence": 0.9}
+        ]
+      }
+    },
+    {
+      "id": "step_02_cook_egg",
+      "sequence": 2,
+      "instruction": "热锅加油，倒入蛋液，炒至主体凝固成块后转中小火。",
+      "objects_involved": ["wok", "oil bottle", "egg", "spatula"],
+      "completion_check": "锅中蛋液已凝固成浅金黄色块状，没有明显焦褐色。",
+      "est_duration_sec": 90,
+      "check_policy": "timer_then_visual",
+      "tips": ["蛋液主体凝固后及时降低火力。"],
+      "failure_modes": ["蛋块出现大面积焦褐色时提示立即降火。"],
+      "high_risk": true,
+      "completion_policy": {
+        "threshold": 0.7,
+        "consecutive_hits": 2,
+        "question_min_score": 0.4,
+        "question_after_ms": 30000,
+        "question": "鸡蛋已经凝固成块、可以进行下一步了吗？",
+        "evidence_rules": [
+          {"id": "egg_roi", "event_type": "perception.roi_state", "payload_matches": {"step_id": "step_02_cook_egg", "state": "egg_set"}, "weight": 0.4, "min_confidence": 0.65},
+          {"id": "egg_visual", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_02_cook_egg", "phase": "likely_complete"}, "weight": 0.3, "min_confidence": 0.75},
+          {"id": "egg_confirm", "event_type": "voice.user_confirmation", "payload_matches": {"step_id": "step_02_cook_egg", "confirmed": true}, "weight": 0.3, "min_confidence": 0.9}
+        ]
+      }
+    },
+    {
+      "id": "step_03_add_rice",
+      "sequence": 3,
+      "instruction": "加入配菜和米饭，捣散饭块并持续翻炒，让蛋和配菜分布均匀。",
+      "objects_involved": ["rice", "wok", "spatula", "bowl"],
+      "completion_check": "锅中没有明显大饭块，蛋、米饭和配菜分布均匀。",
+      "est_duration_sec": 240,
+      "check_policy": "continuous_evidence",
+      "tips": ["较大的饭块要先用锅铲压散。"],
+      "failure_modes": ["饭块持续存在时提示继续压散，不提前推进。"],
+      "high_risk": false,
+      "completion_policy": {
+        "threshold": 0.7,
+        "consecutive_hits": 2,
+        "question_min_score": 0.4,
+        "question_after_ms": 30000,
+        "question": "米饭的大块都已经压散了吗？",
+        "evidence_rules": [
+          {"id": "rice_roi", "event_type": "perception.roi_state", "payload_matches": {"step_id": "step_03_add_rice", "state": "rice_separated"}, "weight": 0.4, "min_confidence": 0.65},
+          {"id": "rice_visual", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_03_add_rice", "phase": "likely_complete"}, "weight": 0.3, "min_confidence": 0.7},
+          {"id": "rice_confirm", "event_type": "voice.user_confirmation", "payload_matches": {"step_id": "step_03_add_rice", "confirmed": true}, "weight": 0.3, "min_confidence": 0.9}
+        ]
+      }
+    },
+    {
+      "id": "step_04_season",
+      "sequence": 4,
+      "instruction": "转小火，加入盐、胡椒粉和生抽，继续翻炒均匀。",
+      "objects_involved": ["soy sauce bottle", "salt", "pepper", "wok", "spatula"],
+      "completion_check": "调味料已加入，锅中米饭颜色和配料分布基本均匀。",
+      "est_duration_sec": 90,
+      "check_policy": "visual_then_confirm",
+      "tips": ["生抽先少量加入，避免颜色和咸味过重。"],
+      "failure_modes": ["酱油瓶只是在灶台旁出现，不能单独视为已加入。"],
+      "high_risk": false,
+      "completion_policy": {
+        "threshold": 0.7,
+        "consecutive_hits": 2,
+        "question_min_score": 0.4,
+        "question_after_ms": 30000,
+        "question": "生抽和其他调味料都加好并炒匀了吗？",
+        "evidence_rules": [
+          {"id": "season_holding", "event_type": "perception.hand_object_relation", "payload_matches": {"step_id": "step_04_season", "relation": "holding_over_wok", "object_class": "soy_sauce_bottle"}, "weight": 0.4, "min_confidence": 0.65},
+          {"id": "season_roi", "event_type": "perception.roi_change", "payload_matches": {"step_id": "step_04_season", "change": "darker_and_uniform"}, "weight": 0.3, "min_confidence": 0.65},
+          {"id": "season_visual", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_04_season", "phase": "likely_complete"}, "weight": 0.3, "min_confidence": 0.75},
+          {"id": "season_confirm", "event_type": "voice.user_confirmation", "payload_matches": {"step_id": "step_04_season", "confirmed": true}, "weight": 0.3, "min_confidence": 0.9}
+        ]
+      }
+    },
+    {
+      "id": "step_05_finish",
+      "sequence": 5,
+      "instruction": "加入香葱翻炒约 10 秒，关火并盛入碗中。",
+      "objects_involved": ["scallion", "wok", "spatula", "bowl"],
+      "completion_check": "炒饭已离锅盛入碗中，表面可见香葱且没有继续加热。",
+      "est_duration_sec": 60,
+      "check_policy": "visual_then_confirm",
+      "tips": ["香葱最后加入以保留颜色和香气。"],
+      "failure_modes": ["仍在灶上持续加热时不判定完成。"],
+      "high_risk": true,
+      "completion_policy": {
+        "threshold": 0.7,
+        "consecutive_hits": 2,
+        "question_min_score": 0.4,
+        "question_after_ms": 30000,
+        "question": "已经关火并把炒饭盛进碗里了吗？",
+        "evidence_rules": [
+          {"id": "finish_objects", "event_type": "perception.objects_present", "payload_matches": {"step_id": "step_05_finish", "state": "food_in_bowl"}, "weight": 0.4, "min_confidence": 0.7},
+          {"id": "finish_visual", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_05_finish", "phase": "likely_complete"}, "weight": 0.3, "min_confidence": 0.75},
+          {"id": "finish_confirm", "event_type": "voice.user_confirmation", "payload_matches": {"step_id": "step_05_finish", "confirmed": true}, "weight": 0.3, "min_confidence": 0.9}
+        ]
+      }
+    }
+  ]
+}

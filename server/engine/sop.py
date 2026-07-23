@@ -1,0 +1,94 @@
+"""Validated in-memory representation of a frozen recipe SOP."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class Ingredient(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1)
+    amount: str = Field(min_length=1)
+
+
+class EvidenceRule(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(min_length=1)
+    event_type: str = Field(min_length=1)
+    payload_matches: dict[str, Any] = Field(default_factory=dict)
+    weight: float = Field(gt=0.0, le=1.0)
+    min_confidence: float = Field(ge=0.0, le=1.0)
+
+
+class CompletionPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    threshold: float = Field(ge=0.0, le=1.0)
+    consecutive_hits: int = Field(ge=1)
+    question_min_score: float = Field(ge=0.0, le=1.0)
+    question_after_ms: int = Field(ge=0)
+    question: str = Field(min_length=1)
+    evidence_rules: tuple[EvidenceRule, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_policy(self) -> "CompletionPolicy":
+        if self.question_min_score >= self.threshold:
+            raise ValueError("question_min_score must be below threshold")
+        ids = [rule.id for rule in self.evidence_rules]
+        if len(ids) != len(set(ids)):
+            raise ValueError("evidence rule ids must be unique within a step")
+        if sum(rule.weight for rule in self.evidence_rules) < self.threshold:
+            raise ValueError("evidence rule weights cannot reach threshold")
+        return self
+
+
+class RecipeStep(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(min_length=1)
+    sequence: int = Field(ge=1)
+    instruction: str = Field(min_length=1)
+    objects_involved: tuple[str, ...] = ()
+    completion_check: str = Field(min_length=1)
+    est_duration_sec: int = Field(ge=1)
+    check_policy: Literal[
+        "continuous_evidence",
+        "timer_then_visual",
+        "visual_then_confirm",
+        "user_confirm",
+    ]
+    tips: tuple[str, ...] = ()
+    failure_modes: tuple[str, ...] = ()
+    high_risk: bool = False
+    completion_policy: CompletionPolicy
+
+
+class RecipeSOP(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["1.0"] = "1.0"
+    recipe_version_id: str = Field(min_length=1)
+    dish: str = Field(min_length=1)
+    language: str = "zh-CN"
+    ingredients: tuple[Ingredient, ...]
+    steps: tuple[RecipeStep, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_steps(self) -> "RecipeSOP":
+        ids = [step.id for step in self.steps]
+        if len(ids) != len(set(ids)):
+            raise ValueError("step ids must be unique")
+        sequences = [step.sequence for step in self.steps]
+        expected = list(range(1, len(self.steps) + 1))
+        if sequences != expected:
+            raise ValueError(f"step sequences must be contiguous and ordered: {expected}")
+        return self
+
+
+def load_recipe(path: str | Path) -> RecipeSOP:
+    return RecipeSOP.model_validate_json(Path(path).read_text(encoding="utf-8"))
