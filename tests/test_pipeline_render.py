@@ -43,3 +43,35 @@ def test_writer_writes_frames_and_reports_count(tmp_path: Path):
     probe = cv2.VideoCapture(str(out))
     assert int(probe.get(cv2.CAP_PROP_FRAME_COUNT)) == 9
     probe.release()
+
+
+def test_draw_overlay_renders_hand_skeleton():
+    import numpy as np
+    from dataclasses import dataclass, field
+
+    @dataclass(frozen=True)
+    class FakeHand:
+        landmarks_px: np.ndarray = field(
+            default_factory=lambda: np.array(
+                [[60.0 + 4 * i, 120.0 + 3 * i] for i in range(21)]))
+        handedness: str = "Right"
+        grip_closure: float = 0.61
+        is_gripping: bool = True
+
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+    before = frame.copy()
+    draw_overlay(
+        frame, detections=[], step_id="step_01_prepare", instruction="x",
+        score=0.0, threshold=0.7, pending_question=None,
+        recent_events=[], color_text=None, hands=[FakeHand()],
+    )
+    assert (frame != before).any()
+
+
+def test_draw_overlay_without_hands_still_works():
+    import numpy as np
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+    draw_overlay(
+        frame, detections=[], step_id="s", instruction="x", score=0.0,
+        threshold=0.7, pending_question=None, recent_events=[], color_text=None,
+    )

@@ -13,6 +13,13 @@ ROLE_COLORS = {"primary": (0, 220, 0), "anchor": (255, 160, 0),
 _FONT = cv2.FONT_HERSHEY_SIMPLEX
 _PINGFANG = "/System/Library/Fonts/PingFang.ttc"
 
+HAND_EDGES = [
+    (0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8),
+    (5, 9), (9, 10), (10, 11), (11, 12), (9, 13), (13, 14), (14, 15), (15, 16),
+    (13, 17), (17, 18), (18, 19), (19, 20), (0, 17),
+]
+HAND_COLOR = (255, 160, 0)
+
 try:  # Pillow ships with ultralytics; optional CJK banner support.
     from PIL import Image, ImageDraw, ImageFont
     _CJK_FONT = ImageFont.truetype(_PINGFANG, 18) if Path(_PINGFANG).exists() else None
@@ -45,6 +52,7 @@ def draw_overlay(
     pending_question: str | None,
     recent_events: Sequence[str],
     color_text: str | None,
+    hands: Sequence = (),
 ) -> None:
     height, width = frame_bgr.shape[:2]
     cv2.rectangle(frame_bgr, (0, 0), (width, 58), (32, 32, 32), -1)
@@ -55,6 +63,18 @@ def draw_overlay(
         cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), color, 2)
         cv2.putText(frame_bgr, f"{det.canonical_label} {det.conf:.2f}",
                     (x1, max(70, y1 - 6)), _FONT, 0.5, color, 1)
+
+    for hand in hands:
+        pts = hand.landmarks_px.astype(int)
+        for a, b in HAND_EDGES:
+            cv2.line(frame_bgr, tuple(pts[a]), tuple(pts[b]), HAND_COLOR, 1)
+        for p in pts:
+            cv2.circle(frame_bgr, tuple(p), 2, HAND_COLOR, -1)
+        x1, y1 = pts.min(axis=0)
+        state = "GRIP" if hand.is_gripping else "open"
+        cv2.putText(frame_bgr,
+                    f"{hand.handedness} {state} {hand.grip_closure:.2f}",
+                    (int(x1), max(70, int(y1) - 6)), _FONT, 0.5, HAND_COLOR, 1)
 
     bar_w = int((width - 16) * min(score / max(threshold, 1e-6), 1.0))
     cv2.rectangle(frame_bgr, (8, 48), (8 + bar_w, 54), (0, 220, 0), -1)
