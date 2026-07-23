@@ -5,7 +5,10 @@ mediapipe==0.10.35
 numpy==2.5.1
 opencv-contrib-python==5.0.0.93
 pytest==9.1.1
+pydantic==2.13.4
+python-dotenv==1.2.2
 python-ulid==4.0.1
+sounddevice==0.5.5
 supabase==2.31.0
 torch==2.13.0
 torchvision==0.28.0

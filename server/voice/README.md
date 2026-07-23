@@ -1,0 +1,56 @@
+# Gemini Live 本地音视频整合测试
+
+这个入口把本机摄像头、麦克风和扬声器接到 Gemini Live，用于在真实硬件到货前验证：
+
+```text
+摄像头 JPEG（最多 1 FPS） ─┐
+                            ├─> Gemini Live ─> 24 kHz 语音 + 终端转写
+麦克风 16 kHz PCM ─────────┘
+```
+
+它不会调用或修改本地 YOLO/MediaPipe 感知代码。画面和麦克风音频会发送给 Gemini API；运行前请移开含隐私、账号或其他敏感信息的物品。
+
+## 配置
+
+在仓库根目录创建本地 `.env`（已被 Git 忽略），填入已有 key：
+
+```dotenv
+GEMINI_API_KEY=你的现有key
+```
+
+不要把真实 key 写进 `.env.example`、源码、截图、终端命令或聊天。
+
+## 运行
+
+建议戴耳机，避免 Gemini 的扬声器输出重新进入麦克风：
+
+```bash
+cd ~/Documents/NomaChef
+.venv/bin/python -m server.voice.live_scene_demo
+```
+
+启动后程序会发送一次中文场景描述请求；随后可以直接对麦克风提问，例如：
+
+- “你现在看到了什么？”
+- “画面里有哪些厨房用品？”
+- “我的手里拿着什么？”
+- “画面中有没有明显的安全风险？”
+
+按摄像头窗口中的 `q` 或终端中的 `Ctrl-C` 退出。默认 100 秒自动结束，因为 Gemini Live 的音频+视频单连接有时长限制。
+
+## 常用选项
+
+```bash
+# 查看本机音频设备编号
+.venv/bin/python -m server.voice.live_scene_demo --list-audio-devices
+
+# 指定摄像头和音频设备
+.venv/bin/python -m server.voice.live_scene_demo \
+  --source 0 --input-device 2 --output-device 3
+
+# 只验证画面描述和终端转写，不采集麦克风、不播放声音
+.venv/bin/python -m server.voice.live_scene_demo \
+  --no-microphone --no-speaker --no-display --duration 20
+```
+
+视频帧发送间隔不能低于 1 秒。模型名默认使用 `gemini-3.1-flash-live-preview`，也可通过 `GEMINI_LIVE_MODEL` 或 `--model` 覆盖，方便 Preview 模型迁移。
