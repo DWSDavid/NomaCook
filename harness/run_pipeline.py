@@ -38,6 +38,9 @@ from server.pipeline.evidence import (
     roi_color_event,
     scripted_event,
 )
+from server.pipeline.narrate import (
+    complete_item, intro_item, question_item, transition_item,
+)
 from server.pipeline.session import (
     SESSION_EPOCH,
     create_run_dir,
@@ -66,6 +69,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--k-frames", type=int, default=3, help="fusion debounce")
     ap.add_argument("--render", action=argparse.BooleanOptionalAction, default=True)
     ap.add_argument("--vlm", choices=["off", "gemini"], default="off")
+    ap.add_argument("--narrate", choices=["off", "say", "gemini"], default="off")
+    ap.add_argument("--voice", default="Tingting", help="say backend voice")
     return ap
 
 
@@ -94,6 +99,8 @@ def run(args: argparse.Namespace) -> dict:
     engine = StateEngine(
         session_id=session_id, recipe=recipe, started_at=SESSION_EPOCH
     )
+    narration: list[dict] = [intro_item(recipe)]
+    last_question: str | None = None
     log = EventLog(paths.events)
     detector = ObjectDetector(device=args.device, conf=0.10)
     controller = ContextualVocabularyController(detector)
@@ -120,7 +127,7 @@ def run(args: argparse.Namespace) -> dict:
     wall_start = time.perf_counter()
 
     def emit(envelope) -> None:
-        nonlocal seq, det_ctx
+        nonlocal seq, det_ctx, last_question
         if envelope.type == "perception.hand_object_relation":
             recent_event_texts.append(
                 f"{envelope.payload.get('relation')} "
@@ -144,9 +151,19 @@ def run(args: argparse.Namespace) -> dict:
                 f"{result.transition.next_step_id or 'SESSION COMPLETE'}"
             )
             if result.transition.next_step_id is not None:
+                narration.append(transition_item(
+                    recipe, result.transition.completed_step_id,
+                    result.transition.next_step_id, envelope.t_device_ms))
                 det_ctx = build_detection_context(engine.context, recipe)
                 controller.sync(det_ctx)
+            else:
+                narration.append(complete_item(envelope.t_device_ms))
+            last_question = None
         elif result.status == "question_pending" and engine.context.pending_question:
+            q = engine.context.pending_question
+            if q is not None and q.question != last_question:
+                narration.append(question_item(q.question, envelope.t_device_ms))
+                last_question = q.question
             print(
                 f"[{envelope.t_device_ms:8.0f}ms] QUESTION: "
                 f"{engine.context.pending_question.question}"
@@ -293,6 +310,7 @@ def run(args: argparse.Namespace) -> dict:
                                       if engine.context.pending_question else None),
                     recent_events=recent_event_texts,
                     color_text=(f"color={color_state}" if color_state else None),
+                    hands=hands,
                 )
                 writer.write(frame)
 
@@ -304,6 +322,8 @@ def run(args: argparse.Namespace) -> dict:
         hand_tracker.close()
         writer and writer.close()
 
+    (paths.root / "narration.json").write_text(
+        json.dumps(narration, ensure_ascii=False, indent=2), encoding="utf-8")
     meta = {
         "session_id": session_id,
         "video": str(video),
@@ -317,6 +337,7 @@ def run(args: argparse.Namespace) -> dict:
         "wall_seconds": round(time.perf_counter() - wall_start, 2),
         "annotated_frames": writer.frames_written if writer else 0,
         "vlm_mode": args.vlm,
+        "narrate_mode": args.narrate,
         "args": {k: v for k, v in vars(args).items()},
     }
     paths.meta.write_text(
@@ -324,6 +345,12 @@ def run(args: argparse.Namespace) -> dict:
     )
     from server.pipeline.report import write_report
     print(f"report -> {write_report(paths)}")
+    if args.narrate != "off":
+        try:
+            from server.pipeline.narrate import narrate_run
+            print(f"narrated -> {narrate_run(paths.root, args.narrate, args.voice)}")
+        except Exception as exc:
+            print(f"NARRATE ERROR (video kept, narration skipped): {exc}")
     print(
         f"frames={frame_idx} events={len(log)} "
         f"transitions={len(transitions)} final={meta['final_status']}"
