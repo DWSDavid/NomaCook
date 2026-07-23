@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.codebase-memory/
+*.pt
+*.onnx
+weights/
+data/sessions/
+data/test_videos/
+data/test_frames/
+.DS_Store
+.env
