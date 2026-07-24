@@ -37,10 +37,21 @@ NomaChef 中文旁白
 - 中文审计原文保留，译文写入 schedule 和 sidecar。
 
 代码分支：<https://github.com/DWSDavid/NomaChef/tree/agent/iflytek-voice>
+草稿 PR：<https://github.com/DWSDavid/NomaChef/pull/1>
 
 全套离线验收 `100 passed`，覆盖鉴权固定向量、翻译签名与解析、PCM 分片、WAV
 原子写入、重试边界、缓存隔离和命令行预检。真实账号联网验收需等待本机 `.env`
 中配置有效凭证和已授权发音人。
+
+## 完整视频回归
+
+已用 `NC_AIV_FHF.mov` 跑完视觉主链路：
+
+- 5,455 帧、1,808 个事件、7 次步骤切换，最终状态 `completed`。
+- 第 7 步于 180.2 秒完成，结尾菜名与旁白正确。
+- Gemini 固定每 5 秒判别，清理后的手部关系与相对位置 context 正常生效。
+- 输出：`data/sessions/ses_rv_tomato_egg_7step_1_nc_aiv_fhf/run_iflytek_voice_regression_v1/annotated.mp4`
+- 讯飞模式也已对同一视频启动预检；因本机尚无 `IFLYTEK_*` 凭证，在加载视觉模型前安全退出，未伪造真实 TTS 验收结果。
 
 ## 仍需外部条件
 
