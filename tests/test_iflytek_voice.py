@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
+import server.iflytek_config as iflytek_config
 from perception.realtime_recognition import SpeechAnnouncer
 from server.iflytek_config import IFlytekCredentials
 from server.voice.iflytek_translate import (
@@ -39,6 +40,14 @@ DATE = "Thu, 01 Aug 2019 01:53:21 GMT"
 
 def _request(text: str = "你好") -> SpeechRequest:
     return SpeechRequest(text=text, language="zh-CN", voice="x4_xiaoyan")
+
+
+def test_chinese_voice_defaults_to_xiaojing(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(iflytek_config, "REPO_ENV_PATH", tmp_path / "missing.env")
+    monkeypatch.delenv("IFLYTEK_TTS_VOICE_ZH_CN", raising=False)
+    monkeypatch.delenv("IFLYTEK_TTS_VOICE", raising=False)
+
+    assert iflytek_config.iflytek_tts_voice("zh-CN") == "aisjinger"
 
 
 def test_tts_auth_matches_fixed_offline_vector():

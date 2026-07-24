@@ -11,7 +11,7 @@ from dotenv import dotenv_values
 
 
 REPO_ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
-DEFAULT_TTS_VOICE_ZH_CN = "x4_xiaoyan"
+DEFAULT_TTS_VOICE_ZH_CN = "aisjinger"
 
 
 @dataclass(frozen=True)
