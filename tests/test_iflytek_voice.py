@@ -42,12 +42,12 @@ def _request(text: str = "你好") -> SpeechRequest:
     return SpeechRequest(text=text, language="zh-CN", voice="x4_xiaoyan")
 
 
-def test_chinese_voice_defaults_to_xiaojing(monkeypatch, tmp_path: Path):
+def test_chinese_voice_defaults_to_yezi(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(iflytek_config, "REPO_ENV_PATH", tmp_path / "missing.env")
     monkeypatch.delenv("IFLYTEK_TTS_VOICE_ZH_CN", raising=False)
     monkeypatch.delenv("IFLYTEK_TTS_VOICE", raising=False)
 
-    assert iflytek_config.iflytek_tts_voice("zh-CN") == "aisjinger"
+    assert iflytek_config.iflytek_tts_voice("zh-CN") == "x4_yezi"
 
 
 def test_tts_auth_matches_fixed_offline_vector():

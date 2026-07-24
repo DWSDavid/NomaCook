@@ -18,7 +18,7 @@
 
 1. 创建 WebAPI 应用，开通“在线语音合成（流式版）”，取得 `APPID`、`APIKey` 和 `APISecret`。
 2. 将三项分别填入 `IFLYTEK_APP_ID`、`IFLYTEK_API_KEY`、`IFLYTEK_API_SECRET`。
-3. 在控制台为应用添加实际使用的发音人。中文默认参数为 `aisjinger`（小婧，更温柔自然）；若账号显示的参数不同，用 `IFLYTEK_TTS_VOICE_ZH_CN` 覆盖。
+3. 在控制台为应用添加实际使用的发音人。中文默认参数为 `x4_yezi`（小露）；若账号显示的参数不同，用 `IFLYTEK_TTS_VOICE_ZH_CN` 覆盖。
 4. 英文或其他语言必须开通对应发音人，并填写相应变量，例如 `IFLYTEK_TTS_VOICE_EN_US`。TTS 的语种由发音人决定，不是仅靠语言代码切换。
 5. 非中文旁白还需要开通“机器翻译”。若该产品给出独立密钥，则填写 `IFLYTEK_MT_APP_ID`、`IFLYTEK_MT_API_KEY`、`IFLYTEK_MT_API_SECRET`；否则留空并复用通用三项。
 
