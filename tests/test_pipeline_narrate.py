@@ -148,3 +148,78 @@ def test_narrate_cache_includes_backend_voice(tmp_path: Path, monkeypatch):
         (run_root / "narration_clips/clip_000.meta.json").read_text()
     )
     assert meta["voice"] == "Meijia" and meta["spoken_text"] == "你好"
+
+
+def test_iflytek_controls_are_forwarded_and_invalidate_cache(
+    tmp_path: Path, monkeypatch
+):
+    import server.iflytek_config as config
+    import server.voice.iflytek_tts as iflytek_tts
+    import server.voice.tts as tts
+    from server.pipeline import narrate
+
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    (run_root / "annotated.mp4").write_bytes(b"video")
+    (run_root / "narration.json").write_text(
+        json.dumps([{"pts_ms": 0.0, "kind": "intro", "text": "你好"}]),
+        encoding="utf-8",
+    )
+    requests: list[tts.SpeechRequest] = []
+
+    class FakeProvider:
+        def __init__(self, credentials) -> None:
+            self.credentials = credentials
+
+    def fake_write(provider, request: tts.SpeechRequest, out_path: Path) -> int:
+        requests.append(request)
+        out_path.write_bytes(b"audio" * 10)
+        return out_path.stat().st_size
+
+    monkeypatch.setattr(narrate, "_require_ffmpeg", lambda: None)
+    monkeypatch.setattr(narrate, "_duration_ms", lambda path: 1_000.0)
+    monkeypatch.setattr(
+        narrate.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args=[], returncode=0),
+    )
+    monkeypatch.setattr(config, "normalize_language", lambda language: language)
+    monkeypatch.setattr(
+        config, "iflytek_tts_voice", lambda language, voice: voice or "vcn"
+    )
+    monkeypatch.setattr(config, "iflytek_credentials", lambda: object())
+    monkeypatch.setattr(iflytek_tts, "IFlytekTTSProvider", FakeProvider)
+    monkeypatch.setattr(tts, "write_wav_sync", fake_write)
+
+    controls = {"iflytek_speed": 65, "iflytek_volume": 45, "iflytek_pitch": 42}
+    narrate.narrate_run(run_root, "iflytek", **controls)
+    narrate.narrate_run(run_root, "iflytek", **controls)
+    narrate.narrate_run(run_root, "iflytek", **{**controls, "iflytek_speed": 66})
+
+    assert [(r.speed, r.volume, r.pitch) for r in requests] == [
+        (65, 45, 42),
+        (66, 45, 42),
+    ]
+    meta = json.loads(
+        (run_root / "narration_clips/clip_000.meta.json").read_text()
+    )
+    assert (meta["speed"], meta["volume"], meta["pitch"]) == (66, 45, 42)
+    schedule = json.loads((run_root / "narration_schedule.json").read_text())
+    assert (
+        schedule[0]["speed"],
+        schedule[0]["volume"],
+        schedule[0]["pitch"],
+    ) == (66, 45, 42)
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    (("iflytek_speed", 101), ("iflytek_volume", -1), ("iflytek_pitch", 101)),
+)
+def test_narrate_rejects_out_of_range_iflytek_controls(
+    tmp_path: Path, name: str, value: int
+):
+    from server.pipeline.narrate import narrate_run
+
+    with pytest.raises(ValueError, match="must be between 0 and 100"):
+        narrate_run(tmp_path, "iflytek", **{name: value})

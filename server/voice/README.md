@@ -62,12 +62,24 @@ cd ~/Documents/NomaChef
 配置方法见 [API Key 配置指引](../../docs/SETUP-KEYS.md)。实时识别演示：
 
 ```bash
-.venv/bin/python harness/iflytek_tts_smoke.py --language zh-CN --play
+.venv/bin/python harness/iflytek_tts_smoke.py \
+  --language zh-CN \
+  --iflytek-speed 58 \
+  --iflytek-volume 44 \
+  --iflytek-pitch 46 \
+  --play
 
 .venv/bin/python harness/live_recognition_demo.py \
   --speech-backend iflytek \
-  --language zh-CN
+  --language zh-CN \
+  --iflytek-speed 58 \
+  --iflytek-volume 44 \
+  --iflytek-pitch 46
 ```
+
+`--iflytek-speed`、`--iflytek-volume`、`--iflytek-pitch` 的有效范围都是
+0–100，默认均为 50。三个讯飞入口使用同一组参数名；建议先用一句话 smoke
+试听，再把满意的数值用于实时识别或完整录像配音。
 
 连接 viaim 或其他蓝牙耳机后，可以让程序使用系统默认输出设备，也可以指定设备编号或名称：
 
@@ -85,7 +97,11 @@ cd ~/Documents/NomaChef
   --source NC_AIV_FHF.mov \
   --narrate iflytek \
   --language en-US \
+  --iflytek-speed 58 \
+  --iflytek-volume 44 \
+  --iflytek-pitch 46 \
   --run-tag iflytek_en_v1
 ```
 
 `narration.json` 始终保留中文审计原文；实际译文、语言和发音人写入 `narration_schedule.json` 及每段音频的 sidecar 元数据。目标语种必须同时具备机器翻译和 TTS 发音人授权。
+三个声音参数也会写入 schedule 和 sidecar；参数改变时，对应音频片段会自动重新合成，不会误用旧缓存。

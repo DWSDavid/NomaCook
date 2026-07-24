@@ -112,6 +112,30 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="console-authorized iFLYTEK vcn; defaults to the language env setting",
     )
+    ap.add_argument(
+        "--iflytek-speed",
+        type=int,
+        choices=range(101),
+        default=50,
+        metavar="0-100",
+        help="iFLYTEK speaking speed (default: 50)",
+    )
+    ap.add_argument(
+        "--iflytek-volume",
+        type=int,
+        choices=range(101),
+        default=50,
+        metavar="0-100",
+        help="iFLYTEK volume (default: 50)",
+    )
+    ap.add_argument(
+        "--iflytek-pitch",
+        type=int,
+        choices=range(101),
+        default=50,
+        metavar="0-100",
+        help="iFLYTEK pitch (default: 50)",
+    )
     return ap
 
 
@@ -590,6 +614,9 @@ def run(args: argparse.Namespace) -> dict:
                 args.voice,
                 language=args.language,
                 iflytek_voice=args.iflytek_voice,
+                iflytek_speed=args.iflytek_speed,
+                iflytek_volume=args.iflytek_volume,
+                iflytek_pitch=args.iflytek_pitch,
             )
             print(f"narrated -> {narrated}")
         except Exception as exc:

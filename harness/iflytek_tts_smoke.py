@@ -53,6 +53,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--language", default="zh-CN")
     parser.add_argument("--voice", default=None, help="console-authorized vcn")
     parser.add_argument(
+        "--iflytek-speed",
+        type=int,
+        choices=range(101),
+        default=50,
+        metavar="0-100",
+        help="speaking speed (default: 50)",
+    )
+    parser.add_argument(
+        "--iflytek-volume",
+        type=int,
+        choices=range(101),
+        default=50,
+        metavar="0-100",
+        help="volume (default: 50)",
+    )
+    parser.add_argument(
+        "--iflytek-pitch",
+        type=int,
+        choices=range(101),
+        default=50,
+        metavar="0-100",
+        help="pitch (default: 50)",
+    )
+    parser.add_argument(
         "--out", default="/tmp/nomachef-iflytek-smoke.wav", help="output WAV"
     )
     parser.add_argument("--play", action="store_true", help="play the saved WAV")
@@ -96,12 +120,22 @@ async def run(args: argparse.Namespace) -> Path:
         translation_ms = (time.perf_counter() - started) * 1000
 
     provider = _MeteredProvider(IFlytekTTSProvider(credentials))
-    request = SpeechRequest(text=spoken_text, language=language, voice=voice)
+    request = SpeechRequest(
+        text=spoken_text,
+        language=language,
+        voice=voice,
+        speed=args.iflytek_speed,
+        volume=args.iflytek_volume,
+        pitch=args.iflytek_pitch,
+    )
     out_path = Path(args.out).expanduser().resolve()
     started = time.perf_counter()
     await write_wav(provider, request, out_path)
     total_ms = (time.perf_counter() - started) * 1000
-    print(f"language={language} voice={voice}")
+    print(
+        f"language={language} voice={voice} speed={request.speed} "
+        f"volume={request.volume} pitch={request.pitch}"
+    )
     print(f"spoken_text={spoken_text}")
     print(f"translation_ms={translation_ms:.1f}")
     print(f"first_audio_ms={provider.first_chunk_ms:.1f}")

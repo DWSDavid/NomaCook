@@ -64,8 +64,27 @@ def test_tts_payload_is_utf8_base64_pcm16k_and_validates_limit():
     assert payload["business"]["aue"] == "raw"
     assert payload["business"]["auf"] == "audio/L16;rate=16000"
     assert payload["business"]["tte"] == "UTF8"
+    assert payload["business"]["speed"] == 50
+    assert payload["business"]["volume"] == 50
+    assert payload["business"]["pitch"] == 50
     assert payload["data"]["status"] == 2
     assert base64.b64decode(payload["data"]["text"]).decode() == "番茄炒蛋"
+
+    tuned = build_request_payload(
+        CREDENTIALS,
+        SpeechRequest(
+            text="番茄炒蛋",
+            language="zh-CN",
+            voice="x4_xiaoyan",
+            speed=65,
+            volume=45,
+            pitch=42,
+        ),
+    )
+    assert {
+        key: tuned["business"][key] for key in ("speed", "volume", "pitch")
+    } == {"speed": 65, "volume": 45, "pitch": 42}
+
     with pytest.raises(ValueError, match="fewer than 8000"):
         build_request_payload(CREDENTIALS, _request("a" * 8000))
 
@@ -251,17 +270,76 @@ def test_speech_announcer_accepts_provider_callback():
 
 
 def test_cli_parsers_accept_iflytek_options():
+    from harness.iflytek_tts_smoke import build_parser as smoke_parser
     from harness.live_recognition_demo import build_parser as live_parser
     from harness.run_pipeline import build_parser as pipeline_parser
 
     pipeline = pipeline_parser().parse_args(
-        ["--source", "demo.mov", "--narrate", "iflytek", "--language", "en-US"]
+        [
+            "--source",
+            "demo.mov",
+            "--narrate",
+            "iflytek",
+            "--language",
+            "en-US",
+            "--iflytek-speed",
+            "65",
+            "--iflytek-volume",
+            "45",
+            "--iflytek-pitch",
+            "42",
+        ]
     )
     assert pipeline.narrate == "iflytek" and pipeline.language == "en-US"
+    assert (
+        pipeline.iflytek_speed,
+        pipeline.iflytek_volume,
+        pipeline.iflytek_pitch,
+    ) == (65, 45, 42)
     live = live_parser().parse_args(
-        ["--speech-backend", "iflytek", "--language", "ja-JP"]
+        [
+            "--speech-backend",
+            "iflytek",
+            "--language",
+            "ja-JP",
+            "--iflytek-speed",
+            "64",
+        ]
     )
     assert live.speech_backend == "iflytek" and live.language == "ja-JP"
+    assert (live.iflytek_speed, live.iflytek_volume, live.iflytek_pitch) == (
+        64,
+        50,
+        50,
+    )
+    smoke = smoke_parser().parse_args([
+        "--iflytek-speed",
+        "63",
+        "--iflytek-volume",
+        "44",
+        "--iflytek-pitch",
+        "41",
+    ])
+    assert (smoke.iflytek_speed, smoke.iflytek_volume, smoke.iflytek_pitch) == (
+        63,
+        44,
+        41,
+    )
+
+
+def test_cli_parsers_reject_out_of_range_iflytek_controls():
+    from harness.iflytek_tts_smoke import build_parser as smoke_parser
+    from harness.live_recognition_demo import build_parser as live_parser
+    from harness.run_pipeline import build_parser as pipeline_parser
+
+    cases = (
+        (pipeline_parser(), ["--source", "demo.mov", "--iflytek-speed", "101"]),
+        (live_parser(), ["--iflytek-volume", "-1"]),
+        (smoke_parser(), ["--iflytek-pitch", "101"]),
+    )
+    for parser, argv in cases:
+        with pytest.raises(SystemExit):
+            parser.parse_args(argv)
 
 
 def test_pipeline_iflytek_preflight_fails_before_opening_video(

@@ -240,7 +240,18 @@ def narrate_run(
     *,
     language: str = "zh-CN",
     iflytek_voice: str | None = None,
+    iflytek_speed: int = 50,
+    iflytek_volume: int = 50,
+    iflytek_pitch: int = 50,
 ) -> Path:
+    if backend == "iflytek":
+        for name, value in (
+            ("iflytek_speed", iflytek_speed),
+            ("iflytek_volume", iflytek_volume),
+            ("iflytek_pitch", iflytek_pitch),
+        ):
+            if not 0 <= value <= 100:
+                raise ValueError(f"{name} must be between 0 and 100")
     _require_ffmpeg()
     items = json.loads((run_root / "narration.json").read_text(encoding="utf-8"))
     if not items:
@@ -295,6 +306,9 @@ def narrate_run(
             "backend": backend,
             "language": output_language,
             "voice": backend_voice,
+            "speed": iflytek_speed,
+            "volume": iflytek_volume,
+            "pitch": iflytek_pitch,
             "style_version": style_version,
         }
         cached = _read_clip_meta(meta_path)
@@ -328,6 +342,9 @@ def narrate_run(
                         text=spoken_text,
                         language=output_language,
                         voice=backend_voice,
+                        speed=iflytek_speed,
+                        volume=iflytek_volume,
+                        pitch=iflytek_pitch,
                     ),
                     clip,
                 )
@@ -353,6 +370,9 @@ def narrate_run(
             "spoken_text": spoken_texts[i],
             "language": output_language,
             "voice": backend_voice,
+            "speed": iflytek_speed,
+            "volume": iflytek_volume,
+            "pitch": iflytek_pitch,
             "duration_ms": round(durations[i], 1),
             "selected": i in selected_starts,
             "actual_start_ms": (

@@ -199,6 +199,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="讯飞控制台已授权的发音人 vcn；默认读取对应语言环境变量",
     )
     parser.add_argument(
+        "--iflytek-speed",
+        type=int,
+        choices=range(101),
+        default=50,
+        metavar="0-100",
+        help="讯飞语速（默认 50）",
+    )
+    parser.add_argument(
+        "--iflytek-volume",
+        type=int,
+        choices=range(101),
+        default=50,
+        metavar="0-100",
+        help="讯飞音量（默认 50）",
+    )
+    parser.add_argument(
+        "--iflytek-pitch",
+        type=int,
+        choices=range(101),
+        default=50,
+        metavar="0-100",
+        help="讯飞音高（默认 50）",
+    )
+    parser.add_argument(
         "--output-device",
         default=None,
         help="讯飞 PCM 播放设备编号或名称；默认使用系统输出设备",
@@ -277,14 +301,25 @@ def run(args: argparse.Namespace) -> int:
             )
             play_stream_sync(
                 provider,
-                SpeechRequest(text=spoken, language=language, voice=voice),
+                SpeechRequest(
+                    text=spoken,
+                    language=language,
+                    voice=voice,
+                    speed=args.iflytek_speed,
+                    volume=args.iflytek_volume,
+                    pitch=args.iflytek_pitch,
+                ),
                 output_device=output_device,
             )
 
         speaker = SpeechAnnouncer(
             enabled=True, voice=voice, speaker=speak_with_iflytek
         )
-        print(f"语音：讯飞流式 TTS，{language=}，{voice=}")
+        print(
+            f"语音：讯飞流式 TTS，{language=}，{voice=}，"
+            f"speed={args.iflytek_speed}，volume={args.iflytek_volume}，"
+            f"pitch={args.iflytek_pitch}"
+        )
     else:
         speaker = SpeechAnnouncer(enabled=not args.no_speech, voice=args.voice)
     if not args.no_speech and not speaker.available:
