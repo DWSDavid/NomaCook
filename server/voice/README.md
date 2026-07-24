@@ -94,14 +94,21 @@ cd ~/Documents/NomaChef
 
 ```bash
 .venv/bin/python harness/run_pipeline.py \
-  --source NC_AIV_FHF.mov \
+  --source /absolute/path/to/cooking-demo.mp4 \
+  --device mps \
+  --vlm gemini \
   --narrate iflytek \
-  --language en-US \
+  --language zh-CN \
+  --iflytek-voice x4_yezi \
   --iflytek-speed 58 \
   --iflytek-volume 44 \
   --iflytek-pitch 46 \
-  --run-tag iflytek_en_v1
+  --run-tag iflytek_zh_v1
 ```
 
 `narration.json` 始终保留中文审计原文；实际译文、语言和发音人写入 `narration_schedule.json` 及每段音频的 sidecar 元数据。目标语种必须同时具备机器翻译和 TTS 发音人授权。
 三个声音参数也会写入 schedule 和 sidecar；参数改变时，对应音频片段会自动重新合成，不会误用旧缓存。
+
+英文或其他语言属于可选路径：将 `--language` 与 `--iflytek-voice` 改成控制台
+已授权的目标语种，并先为当前 APPID 开通机器翻译，或配置独立的
+`IFLYTEK_MT_*` 凭证。机器翻译未授权时，中文路径仍可独立正常运行。

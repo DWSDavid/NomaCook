@@ -39,9 +39,10 @@ NomaChef 中文旁白
 代码分支：<https://github.com/DWSDavid/NomaChef/tree/agent/iflytek-voice>
 草稿 PR：<https://github.com/DWSDavid/NomaChef/pull/1>
 
-全套离线验收 `100 passed`，覆盖鉴权固定向量、翻译签名与解析、PCM 分片、WAV
-原子写入、重试边界、缓存隔离和命令行预检。真实账号联网验收需等待本机 `.env`
-中配置有效凭证和已授权发音人。
+全套验收 `106 passed`，覆盖鉴权固定向量、翻译签名与解析、PCM 分片、WAV
+原子写入、重试边界、缓存隔离和命令行预检。真实账号联网验收已通过：默认发音人
+`x4_yezi`（小露），语速 58、音量 44、音高 46；本地 `.env` 已配置且保持 Git 忽略，
+凭证未进入代码、文档或提交历史。
 
 ## 完整视频回归
 
@@ -50,11 +51,13 @@ NomaChef 中文旁白
 - 5,455 帧、1,808 个事件、7 次步骤切换，最终状态 `completed`。
 - 第 7 步于 180.2 秒完成，结尾菜名与旁白正确。
 - Gemini 固定每 5 秒判别，清理后的手部关系与相对位置 context 正常生效。
-- 输出：`data/sessions/ses_rv_tomato_egg_7step_1_nc_aiv_fhf/run_iflytek_voice_regression_v1/annotated.mp4`
-- 讯飞模式也已对同一视频启动预检；因本机尚无 `IFLYTEK_*` 凭证，在加载视觉模型前安全退出，未伪造真实 TTS 验收结果。
+- 视觉输出：`data/sessions/ses_rv_tomato_egg_7step_1_nc_aiv_fhf/run_iflytek_voice_regression_v1/annotated.mp4`。
+- 小露旁白成片：复用已验收的视觉 run，再调用与 runner `--narrate iflytek` 相同的 `narrate_run`，输出 `data/sessions/ses_rv_tomato_egg_7step_1_nc_aiv_fhf/run_iflytek_voice_yezi_v1/annotated_narrated.mp4`，没有重复运行或改变 VLM 判定结果。
+- 讯飞实际合成 24 条旁白，排期选中 16 条；成片 181.833 秒、1280×720，视频 MPEG-4 + AAC 16 kHz 单声道音轨，已通过 `ffprobe` 与 SHA-256 复制一致性检查。
+- 成片 SHA-256：`aa6c3a1fd7ac55e0a85db329839c80c7d0a02e0e5c7055ffe176cdbfbdca51c1`。
 
-## 仍需外部条件
+## 外部条件与已知边界
 
-- `.env` 中有效的讯飞 `APPID`、`APIKey`、`APISecret`。
-- 控制台开通在线语音合成、机器翻译，以及目标语言发音人。
+- 新环境仍需在本地 `.env` 填写有效的讯飞 `APPID`、`APIKey`、`APISecret`，并在控制台开通在线语音合成与目标发音人。
+- 当前应用的中文 `x4_yezi` 已授权并实测通过；机器翻译仍返回业务码 `11200`，英文及其他翻译旁白需先为当前 APPID 开通机器翻译，或配置独立 `IFLYTEK_MT_*` 凭证。
 - viaim 比赛专用 Skill SDK/输入输出契约；公开资料尚不足以确认第三方 PCM 是否能直送耳机。
