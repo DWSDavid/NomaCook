@@ -7,7 +7,7 @@ and a human-facing "...已识别" announcement:
 1. map English YOLO-World prompts to canonical Chinese concepts;
 2. require repeated hits across a short temporal window;
 3. suppress duplicate announcements while an object remains visible; and
-4. run macOS speech on a background thread so inference never waits for TTS.
+4. run the selected speech backend on a worker thread so inference never waits.
 """
 
 from __future__ import annotations
@@ -303,7 +303,7 @@ class DishConfirmationGate:
 
 
 class SpeechAnnouncer:
-    """Serialize ``say`` calls on a worker thread without blocking video."""
+    """Speak the latest pending message without blocking video inference."""
 
     def __init__(
         self,
@@ -312,40 +312,58 @@ class SpeechAnnouncer:
         voice: str = "Tingting",
         command: str | None = None,
         runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+        speaker: Callable[[str], None] | None = None,
     ) -> None:
-        resolved = command or shutil.which("say")
+        resolved = None if speaker is not None else command or shutil.which("say")
         self.voice = voice
-        self.available = resolved is not None
+        self.available = speaker is not None or resolved is not None
         self.enabled = enabled and self.available
         self._command = resolved
         self._runner = runner
-        self._queue: queue.Queue[str | None] = queue.Queue(maxsize=8)
+        self._speaker = speaker
+        # Speech (especially translation + cloud TTS + playback) can take longer
+        # than detections arrive.  Keep only one pending utterance so stale
+        # recognition chatter cannot accumulate behind the message being spoken.
+        self._queue: queue.Queue[str | None] = queue.Queue(maxsize=1)
+        self._lock = threading.Lock()
+        self._closed = False
         self._thread: threading.Thread | None = None
         self.last_error: str | None = None
         if self.enabled:
             self._start()
 
     def _start(self) -> None:
-        if self._thread is not None:
-            return
-        self._thread = threading.Thread(
-            target=self._worker, name="nomacook-speech", daemon=True
-        )
-        self._thread.start()
+        with self._lock:
+            if self._closed or self._thread is not None:
+                return
+            self._thread = threading.Thread(
+                target=self._worker, name="nomacook-speech", daemon=True
+            )
+            self._thread.start()
 
     def set_enabled(self, enabled: bool) -> None:
-        self.enabled = enabled and self.available
-        if self.enabled:
+        with self._lock:
+            if self._closed:
+                self.enabled = False
+                return
+            self.enabled = enabled and self.available
+            should_start = self.enabled and self._thread is None
+        if should_start:
             self._start()
 
     def speak(self, text: str) -> bool:
-        if not self.enabled or not text.strip():
+        cleaned = text.strip()
+        if not cleaned:
             return False
-        try:
-            self._queue.put_nowait(text.strip())
-        except queue.Full:
-            return False
-        return True
+        with self._lock:
+            if self._closed or not self.enabled:
+                return False
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                pass
+            self._queue.put_nowait(cleaned)
+            return True
 
     def _worker(self) -> None:
         while True:
@@ -355,6 +373,9 @@ class SpeechAnnouncer:
             if not self.enabled:
                 continue
             try:
+                if self._speaker is not None:
+                    self._speaker(text)
+                    continue
                 result = self._runner(
                     [str(self._command), "-v", self.voice, text],
                     capture_output=True,
@@ -367,14 +388,21 @@ class SpeechAnnouncer:
                 self.last_error = str(exc)
 
     def close(self, timeout: float = 3.0) -> None:
-        if self._thread is None:
-            return
-        try:
-            self._queue.put_nowait(None)
-        except queue.Full:
-            # Do not block shutdown behind a long queue of demo speech.
-            return
-        self._thread.join(timeout=timeout)
+        with self._lock:
+            self.enabled = False
+            if not self._closed:
+                self._closed = True
+                # Drop pending chatter; finish only an utterance whose callback
+                # has already begun, then let the worker consume the sentinel.
+                try:
+                    self._queue.get_nowait()
+                except queue.Empty:
+                    pass
+                if self._thread is not None:
+                    self._queue.put_nowait(None)
+            thread = self._thread
+        if thread is not None:
+            thread.join(timeout=timeout)
 
 
 def prompts_for_profile(profile: str) -> list[str]:

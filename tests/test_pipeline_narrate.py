@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -111,3 +112,39 @@ def test_probe_seg_color_thresholds():
     assert classify_mask_color((28, 150, 180)) == "egg_yellow"
     assert classify_mask_color((28, 40, 180)) is None  # washed out
     assert classify_mask_color((100, 200, 150)) is None  # blue-ish
+
+
+def test_narrate_cache_includes_backend_voice(tmp_path: Path, monkeypatch):
+    from server.pipeline import narrate
+
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    (run_root / "annotated.mp4").write_bytes(b"video")
+    (run_root / "narration.json").write_text(
+        json.dumps([{"pts_ms": 0.0, "kind": "intro", "text": "你好"}]),
+        encoding="utf-8",
+    )
+    calls: list[tuple[str, str]] = []
+
+    def fake_say(text: str, out_path: Path, voice: str) -> None:
+        calls.append((text, voice))
+        out_path.write_bytes(b"audio")
+
+    monkeypatch.setattr(narrate, "_require_ffmpeg", lambda: None)
+    monkeypatch.setattr(narrate, "_duration_ms", lambda path: 1_000.0)
+    monkeypatch.setattr(narrate, "synthesize_say", fake_say)
+    monkeypatch.setattr(
+        narrate.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args=[], returncode=0),
+    )
+
+    narrate.narrate_run(run_root, "say", "Tingting")
+    narrate.narrate_run(run_root, "say", "Tingting")
+    narrate.narrate_run(run_root, "say", "Meijia")
+
+    assert calls == [("你好", "Tingting"), ("你好", "Meijia")]
+    meta = json.loads(
+        (run_root / "narration_clips/clip_000.meta.json").read_text()
+    )
+    assert meta["voice"] == "Meijia" and meta["spoken_text"] == "你好"

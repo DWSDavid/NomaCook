@@ -1,0 +1,49 @@
+# NomaChef 同步快照 — 2026-07-24
+
+## 稳定基线
+
+- Git commit：`252dd9ba4275748eb42c4c8ae6c3daa480a14295`
+- Git tag：`vlm_ctx_v1`
+- 状态：`main` 与 `origin/main` 一致；工作区在接入讯飞前为 clean。
+- GitHub：<https://github.com/DWSDavid/NomaChef/tree/vlm_ctx_v1>
+
+该基线包含：VLM 接收清理后的手部关系与相对位置 context；系统提示第 7 条；固定 5 秒 VLM 判别；SOP 菜名收尾旁白；清爽检测框；`vlm_ctx_v1` 完整验收记录。
+
+## 科大讯飞接入
+
+新增的语音链路：
+
+```text
+NomaChef 中文旁白
+  ├─ zh-CN ─────────────────────────────┐
+  └─ 其他语言 → 讯飞机器翻译 ────────────┤
+                                        ↓
+                         讯飞 WebSocket 流式 TTS
+                                        ↓
+                     16 kHz PCM 边收边播 / 收集成 WAV
+                                        ↓
+                         viaim 或其他系统音频输出设备
+```
+
+实现范围：
+
+- HMAC-SHA256 WebSocket 鉴权，不记录签名 URL 或密钥。
+- Provider-neutral PCM 流与原子 WAV 写入。
+- 讯飞机器翻译，支持独立翻译密钥或复用应用密钥。
+- 离线成片增加 `--narrate iflytek --language ...`。
+- 实时识别增加 `--speech-backend iflytek`，后台队列不阻塞视觉识别。
+- 实时提示采用 latest-wins 队列，合成较慢时会丢弃尚未播出的旧提示，避免语音越积越晚。
+- 音频缓存包含 provider、语言、发音人和风格版本，避免切换音色后误复用。
+- 中文审计原文保留，译文写入 schedule 和 sidecar。
+
+代码分支：<https://github.com/DWSDavid/NomaChef/tree/agent/iflytek-voice>
+
+全套离线验收 `100 passed`，覆盖鉴权固定向量、翻译签名与解析、PCM 分片、WAV
+原子写入、重试边界、缓存隔离和命令行预检。真实账号联网验收需等待本机 `.env`
+中配置有效凭证和已授权发音人。
+
+## 仍需外部条件
+
+- `.env` 中有效的讯飞 `APPID`、`APIKey`、`APISecret`。
+- 控制台开通在线语音合成、机器翻译，以及目标语言发音人。
+- viaim 比赛专用 Skill SDK/输入输出契约；公开资料尚不足以确认第三方 PCM 是否能直送耳机。
