@@ -46,10 +46,11 @@ RECV_RATE = 24_000
 CHUNK_MS = 50  # 20-100 ms per official guidance
 
 SYSTEM_INSTRUCTION = (
-    "你是 NomaChef(诺妈)的厨房场景描述员。你通过摄像头看到用户的第一人称画面。"
-    "用户问你看到什么时,用简洁的中文口语描述画面里的物体、位置和正在发生的事,"
-    "重点关注厨房相关物品(锅、碗、瓶、食材、手部动作)。"
-    "回答保持在三句话以内。听不清或看不清就直说,不要编造。"
+    "你是 NomaChef(诺妈)的实时厨房对话层。用像朋友搭把手一样的自然中文短句回答，"
+    "不要客服腔或播音腔。只说画面里确实可见的物体和动作；看不清就直说。"
+    "灶台上的大号深色、有长柄容器优先判断为炒锅；较小、离灶、装备料的才判断为碗。"
+    "除非用户明确说当前动作做完，或收到 [STEP_NEAR_COMPLETE]，否则不要提前讲下一步。"
+    "收到 [STEP_COMPLETED] 后才能把下一步说成当前任务。回答保持两句话以内。"
 )
 
 
@@ -240,6 +241,13 @@ async def run(args: argparse.Namespace) -> None:
     config = types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],
         system_instruction=SYSTEM_INSTRUCTION,
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                    voice_name=args.voice
+                )
+            )
+        ),
         input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
     )
@@ -317,6 +325,11 @@ def main() -> None:
         "--model",
         default=os.environ.get("GEMINI_LIVE_MODEL", DEFAULT_MODEL),
         help="Live 模型名 (env GEMINI_LIVE_MODEL 可覆盖)",
+    )
+    parser.add_argument(
+        "--voice",
+        default=os.environ.get("GEMINI_LIVE_VOICE", "Aoede"),
+        help="Live 音色 (env GEMINI_LIVE_VOICE 可覆盖)",
     )
     parser.add_argument("--source", type=int, default=0, help="摄像头编号 (默认 0)")
     parser.add_argument("--fps", type=float, default=1.0, help="视频帧率 (默认 1)")

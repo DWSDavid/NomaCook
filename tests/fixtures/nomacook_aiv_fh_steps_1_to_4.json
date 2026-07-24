@@ -1,0 +1,5 @@
+[
+  {"pts_ms": 30000, "type": "vlm.step_assessment", "step_id": "step_01_prepare",       "phase": "likely_complete", "confidence": 0.95},
+  {"pts_ms": 45000, "type": "vlm.step_assessment", "step_id": "step_02_beat_eggs",     "phase": "likely_complete", "confidence": 0.95},
+  {"pts_ms": 60000, "type": "vlm.step_assessment", "step_id": "step_03_cut_tomatoes", "phase": "likely_complete", "confidence": 0.95}
+]

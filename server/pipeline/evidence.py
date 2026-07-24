@@ -20,10 +20,16 @@ INTERACTION_TYPE = "perception.hand_object_relation"
 # be visible in the same keyframe). Confidence is the weakest member.
 TOMATO_EGG_PRESENCE: dict[str, list[tuple[str, frozenset[str]]]] = {
     "step_01_prepare": [
-        ("tomato_egg_tools_ready", frozenset({"tomato", "egg", "bowl"}))
+        ("core_ingredients_ready", frozenset({"tomato", "egg", "bowl"}))
     ],
-    "step_04_combine_and_plate": [
-        ("food_on_plate", frozenset({"plate", "wok"}))
+    "step_02_beat_eggs": [
+        ("egg_bowl_ready", frozenset({"egg", "bowl"}))
+    ],
+    "step_03_cut_tomatoes": [
+        ("tomato_cutting_setup", frozenset({"tomato", "cutting_board"}))
+    ],
+    "step_07_plate": [
+        ("food_on_plate", frozenset({"plate", "tomato", "egg"}))
     ],
 }
 

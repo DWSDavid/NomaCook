@@ -11,7 +11,12 @@ import numpy as np
 ROLE_COLORS = {"primary": (0, 220, 0), "anchor": (255, 160, 0),
                "confuser": (0, 210, 255)}
 _FONT = cv2.FONT_HERSHEY_SIMPLEX
-_PINGFANG = "/System/Library/Fonts/PingFang.ttc"
+_CJK_FONT_CANDIDATES = (
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+    "/System/Library/Fonts/STHeiti Medium.ttc",
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+)
 
 HAND_EDGES = [
     (0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8),
@@ -22,7 +27,12 @@ HAND_COLOR = (255, 160, 0)
 
 try:  # Pillow ships with ultralytics; optional CJK banner support.
     from PIL import Image, ImageDraw, ImageFont
-    _CJK_FONT = ImageFont.truetype(_PINGFANG, 18) if Path(_PINGFANG).exists() else None
+    _CJK_FONT_PATH = next(
+        (path for path in _CJK_FONT_CANDIDATES if Path(path).exists()), None
+    )
+    _CJK_FONT = (
+        ImageFont.truetype(_CJK_FONT_PATH, 18) if _CJK_FONT_PATH else None
+    )
 except Exception:  # pragma: no cover - environment without Pillow
     _CJK_FONT = None
 
@@ -53,6 +63,9 @@ def draw_overlay(
     recent_events: Sequence[str],
     color_text: str | None,
     hands: Sequence = (),
+    step_sequence: int | None = None,
+    total_steps: int | None = None,
+    step_title: str = "",
 ) -> None:
     height, width = frame_bgr.shape[:2]
     cv2.rectangle(frame_bgr, (0, 0), (width, 58), (32, 32, 32), -1)
@@ -80,7 +93,14 @@ def draw_overlay(
     cv2.rectangle(frame_bgr, (8, 48), (8 + bar_w, 54), (0, 220, 0), -1)
     cv2.rectangle(frame_bgr, (8, 48), (width - 8, 54), (90, 90, 90), 1)
 
-    lines = [f"{step_id}  score {score:.2f}/{threshold:.2f}", instruction]
+    if step_sequence is not None and total_steps is not None:
+        heading = f"第 {step_sequence}/{total_steps} 步"
+        if step_title:
+            heading += f" · {step_title}"
+        heading += f"  score {score:.2f}/{threshold:.2f}"
+    else:
+        heading = f"{step_id}  score {score:.2f}/{threshold:.2f}"
+    lines = [heading, instruction]
     if pending_question:
         lines[1] = f"? {pending_question}"
     _banner_text(frame_bgr, lines)

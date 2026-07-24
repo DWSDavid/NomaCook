@@ -27,7 +27,7 @@ Hold up tomatoes, eggs, a bowl, and a knife one at a time. Green boxes are curre
 ```bash
 .venv/bin/python -m server.perception.live_context_demo --list-steps
 .venv/bin/python -m server.perception.live_context_demo \
-  --step step_02_scramble_egg --color-signals
+  --step step_04_scramble_eggs --color-signals
 ```
 
 For the color option, HSV evidence is measured only inside a detected wok. Red/yellow ratios are weak evidence; the VLM still decides whether egg is set, tomato is softened, or the dish is plated.
@@ -36,9 +36,12 @@ For the color option, HSV evidence is measured only inside a detected wok. Red/y
 
 | Step | Continuous/local calls | Triggered semantic check |
 |---|---|---|
-| Prepare | YOLO: tomato, egg, bowl, cutting board, kitchen knife | VLM: tomato is cut and egg liquid is visually uniform |
-| Scramble egg | YOLO: wok, oil bottle, egg, bowl, spatula, plate; HSV: `yellow_dominant` inside wok | VLM: egg is set into pale-yellow curds, not liquid or badly browned |
-| Soften tomato | YOLO: tomato, wok, spatula; HSV: `red_dominant` inside wok | VLM: tomato edges are softened and visible juice has appeared |
-| Combine and plate | YOLO: tomato, egg, wok, spatula, salt, plate; HSV: `red_yellow_mixed` | VLM: red/yellow food is mixed, heat is off, and food is plated |
+| Prepare | YOLO: ingredients plus the named prep tools | VLM: core ingredients are staged or beating has begun |
+| Beat eggs | YOLO: egg, bowl, chopsticks | VLM: egg liquid is visually uniform |
+| Cut tomatoes | YOLO: tomato, cutting board, knife | VLM: all tomatoes are in similarly sized pieces |
+| Scramble eggs | YOLO: wok, oil bottle, egg, bowl, spatula; HSV: `yellow_dominant` inside wok | VLM: egg is set into pale-yellow curds and being removed |
+| Fry tomatoes | YOLO: tomato, wok, oil, salt, sugar, spatula; HSV: `red_dominant` | VLM: tomato is softened and visible juice has appeared |
+| Combine | YOLO: tomato, egg, wok, spatula; HSV: `red_yellow_mixed` | VLM: red/yellow food is evenly mixed but remains chunky |
+| Plate | YOLO: tomato, egg, plate, wok, spatula | VLM: food is plated and no longer heating |
 
 These names exactly match the evidence rules in `sop/tomato_egg.json`, so accepted signals can flow directly into the deterministic state engine.

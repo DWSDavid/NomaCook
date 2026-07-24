@@ -1,327 +1,205 @@
 {
   "schema_version": "1.0",
-  "recipe_version_id": "rv_tomato_egg_demo_1",
-  "dish": "番茄炒鸡蛋",
+  "recipe_version_id": "rv_tomato_egg_7step_1",
+  "dish": "番茄炒蛋",
   "language": "zh-CN",
   "ingredients": [
-    {
-      "name": "番茄",
-      "amount": "2 个，约 360 g"
-    },
-    {
-      "name": "鸡蛋",
-      "amount": "3 个"
-    },
-    {
-      "name": "食用油",
-      "amount": "约 12 ml"
-    },
-    {
-      "name": "盐",
-      "amount": "适量"
-    },
-    {
-      "name": "糖",
-      "amount": "可选"
-    },
-    {
-      "name": "葱花",
-      "amount": "可选"
-    }
+    {"name": "番茄", "amount": "2 个"},
+    {"name": "鸡蛋", "amount": "2 个"},
+    {"name": "食用油", "amount": "少量"},
+    {"name": "盐", "amount": "少量"},
+    {"name": "糖", "amount": "少量"}
   ],
   "steps": [
     {
       "id": "step_01_prepare",
       "sequence": 1,
-      "instruction": "番茄切成小块；鸡蛋打入碗中，加少量盐并搅匀。",
+      "title": "准备食材和工具",
+      "instruction": "请准备两个番茄、两个鸡蛋、碗、筷子、砧板、刀、炒锅、木铲、食用油、盐和糖。",
+      "completion_message": "食材和工具已经齐全，可以开始打鸡蛋了。",
       "objects_involved": [
-        "tomato",
-        "egg",
-        "bowl",
-        "cutting board",
-        "kitchen knife"
+        "tomato", "egg", "bowl", "chopsticks", "cutting_board",
+        "kitchen_knife", "wok", "spatula", "oil_bottle", "salt", "sugar"
       ],
-      "completion_check": "番茄已切成块，碗中蛋液颜色均匀且没有明显完整蛋黄。",
-      "est_duration_sec": 180,
+      "completion_check": "至少两个番茄、两个鸡蛋、碗和备料台面已经直接可见；若当前画面已经开始打蛋，也可确认准备步骤已经结束。炒锅、木铲、油、盐和糖不要求全部同时出现在同一帧。",
+      "est_duration_sec": 60,
       "check_policy": "visual_then_confirm",
-      "tips": [
-        "番茄块大小尽量接近，便于均匀软化。"
-      ],
-      "failure_modes": [
-        "只看到完整番茄和鸡蛋时不能判定备料完成。"
-      ],
+      "tips": ["把刀和热锅分开放置，先确认台面稳定、顺手。"],
+      "failure_modes": ["只看到单个食材、没有可用备料区域，且尚未开始打蛋时，不能判定准备完成。"],
       "high_risk": false,
       "completion_policy": {
-        "threshold": 0.6,
-        "consecutive_hits": 2,
-        "question_min_score": 0.3,
-        "question_after_ms": 20000,
-        "question": "番茄切好、鸡蛋也打匀了吗？",
+        "threshold": 0.75,
+        "consecutive_hits": 1,
+        "question_min_score": 0.1,
+        "question_after_ms": 15000,
+        "question": "食材和工具都准备好了吗？",
         "evidence_rules": [
-          {
-            "id": "prep_objects",
-            "event_type": "perception.objects_present",
-            "payload_matches": {
-              "step_id": "step_01_prepare",
-              "state": "tomato_egg_tools_ready"
-            },
-            "weight": 0.35,
-            "min_confidence": 0.35
-          },
-          {
-            "id": "prep_visual",
-            "event_type": "vlm.step_assessment",
-            "payload_matches": {
-              "step_id": "step_01_prepare",
-              "phase": "likely_complete"
-            },
-            "weight": 0.5,
-            "min_confidence": 0.6
-          },
-          {
-            "id": "prep_visual_progress",
-            "event_type": "vlm.step_assessment",
-            "payload_matches": {
-              "step_id": "step_01_prepare",
-              "phase": "in_progress"
-            },
-            "weight": 0.25,
-            "min_confidence": 0.6
-          },
-          {
-            "id": "prep_confirm",
-            "event_type": "voice.user_confirmation",
-            "payload_matches": {
-              "step_id": "step_01_prepare",
-              "confirmed": true
-            },
-            "weight": 0.6,
-            "min_confidence": 0.9
-          }
+          {"id": "prep_core_objects", "event_type": "perception.objects_present", "payload_matches": {"step_id": "step_01_prepare", "state": "core_ingredients_ready"}, "weight": 0.15, "min_confidence": 0.3, "advances_confirmation_streak": false},
+          {"id": "prep_in_progress", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_01_prepare", "phase": "in_progress"}, "weight": 0.1, "min_confidence": 0.6, "advances_confirmation_streak": false},
+          {"id": "prep_visual_complete", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_01_prepare", "phase": "likely_complete"}, "weight": 0.8, "min_confidence": 0.65},
+          {"id": "prep_user_confirm", "event_type": "voice.user_confirmation", "payload_matches": {"step_id": "step_01_prepare", "confirmed": true}, "weight": 0.75, "min_confidence": 0.9}
         ]
       }
     },
     {
-      "id": "step_02_scramble_egg",
+      "id": "step_02_beat_eggs",
       "sequence": 2,
-      "instruction": "热锅加油，倒入蛋液，翻炒至鸡蛋凝固成浅黄色块状后盛出。",
-      "objects_involved": [
-        "wok",
-        "oil bottle",
-        "egg",
-        "bowl",
-        "spatula",
-        "plate"
-      ],
-      "completion_check": "鸡蛋已凝固成浅黄色块状并盛出，没有明显液态蛋液或大面积焦褐色。",
-      "est_duration_sec": 90,
-      "check_policy": "timer_then_visual",
-      "tips": [
-        "主体刚凝固时盛出，避免最后回锅后过老。"
-      ],
-      "failure_modes": [
-        "仍有明显液态蛋液时继续加热；出现焦褐色时提示立即关小火。"
-      ],
-      "high_risk": true,
+      "title": "打散鸡蛋",
+      "instruction": "请把两个鸡蛋打入碗中，再用筷子搅拌均匀。",
+      "completion_message": "我看到蛋液已经变得均匀，可以开始切番茄了。",
+      "objects_involved": ["egg", "bowl", "chopsticks"],
+      "completion_check": "碗中两个或以上鸡蛋的蛋黄和蛋白已经混合成基本均匀的黄色蛋液，没有明显完整蛋黄；若已进入热锅阶段，只有在当前帧仍能直接看到准备好的均匀蛋液时才可判定完成。",
+      "est_duration_sec": 45,
+      "check_policy": "visual_then_confirm",
+      "tips": ["沿同一方向搅拌，看到颜色均匀就可以停。"],
+      "failure_modes": ["碗中仍有完整蛋黄、只打入鸡蛋但没有搅匀时，不能判定完成。"],
+      "high_risk": false,
       "completion_policy": {
-        "threshold": 0.6,
-        "consecutive_hits": 2,
-        "question_min_score": 0.3,
-        "question_after_ms": 20000,
-        "question": "鸡蛋已经凝固成块并盛出来了吗？",
+        "threshold": 0.75,
+        "consecutive_hits": 1,
+        "question_min_score": 0.1,
+        "question_after_ms": 15000,
+        "question": "蛋液已经搅拌均匀了吗？",
         "evidence_rules": [
-          {
-            "id": "egg_yellow_roi",
-            "event_type": "perception.roi_color",
-            "payload_matches": {
-              "step_id": "step_02_scramble_egg",
-              "state": "yellow_dominant"
-            },
-            "weight": 0.35,
-            "min_confidence": 0.5
-          },
-          {
-            "id": "egg_visual",
-            "event_type": "vlm.step_assessment",
-            "payload_matches": {
-              "step_id": "step_02_scramble_egg",
-              "phase": "likely_complete"
-            },
-            "weight": 0.5,
-            "min_confidence": 0.6
-          },
-          {
-            "id": "egg_visual_progress",
-            "event_type": "vlm.step_assessment",
-            "payload_matches": {
-              "step_id": "step_02_scramble_egg",
-              "phase": "in_progress"
-            },
-            "weight": 0.25,
-            "min_confidence": 0.6
-          },
-          {
-            "id": "egg_confirm",
-            "event_type": "voice.user_confirmation",
-            "payload_matches": {
-              "step_id": "step_02_scramble_egg",
-              "confirmed": true
-            },
-            "weight": 0.4,
-            "min_confidence": 0.9
-          }
+          {"id": "egg_bowl_present", "event_type": "perception.objects_present", "payload_matches": {"step_id": "step_02_beat_eggs", "state": "egg_bowl_ready"}, "weight": 0.15, "min_confidence": 0.3, "advances_confirmation_streak": false},
+          {"id": "beat_in_progress", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_02_beat_eggs", "phase": "in_progress"}, "weight": 0.1, "min_confidence": 0.6, "advances_confirmation_streak": false},
+          {"id": "beat_visual_complete", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_02_beat_eggs", "phase": "likely_complete"}, "weight": 0.8, "min_confidence": 0.65},
+          {"id": "beat_user_confirm", "event_type": "voice.user_confirmation", "payload_matches": {"step_id": "step_02_beat_eggs", "confirmed": true}, "weight": 0.75, "min_confidence": 0.9}
         ]
       }
     },
     {
-      "id": "step_03_soften_tomato",
+      "id": "step_03_cut_tomatoes",
       "sequence": 3,
-      "instruction": "把番茄块倒入锅中，翻炒并轻压，直到番茄明显软化出汁。",
-      "objects_involved": [
-        "tomato",
-        "wok",
-        "spatula"
-      ],
-      "completion_check": "锅中番茄边缘已软化并出现可见汤汁，仍保留部分红色块状结构。",
-      "est_duration_sec": 120,
-      "check_policy": "continuous_evidence",
-      "tips": [
-        "用锅铲轻压番茄可以更快出汁。"
-      ],
-      "failure_modes": [
-        "只有干燥完整番茄块时不能判定已经软化。"
-      ],
-      "high_risk": true,
-      "completion_policy": {
-        "threshold": 0.6,
-        "consecutive_hits": 2,
-        "question_min_score": 0.2,
-        "question_after_ms": 25000,
-        "question": "番茄已经炒软并开始出汁了吗？",
-        "evidence_rules": [
-          {
-            "id": "tomato_red_roi",
-            "event_type": "perception.roi_color",
-            "payload_matches": {
-              "step_id": "step_03_soften_tomato",
-              "state": "red_dominant"
-            },
-            "weight": 0.3,
-            "min_confidence": 0.5
-          },
-          {
-            "id": "tomato_visual",
-            "event_type": "vlm.step_assessment",
-            "payload_matches": {
-              "step_id": "step_03_soften_tomato",
-              "phase": "likely_complete"
-            },
-            "weight": 0.55,
-            "min_confidence": 0.6
-          },
-          {
-            "id": "tomato_visual_progress",
-            "event_type": "vlm.step_assessment",
-            "payload_matches": {
-              "step_id": "step_03_soften_tomato",
-              "phase": "in_progress"
-            },
-            "weight": 0.3,
-            "min_confidence": 0.6
-          },
-          {
-            "id": "tomato_confirm",
-            "event_type": "voice.user_confirmation",
-            "payload_matches": {
-              "step_id": "step_03_soften_tomato",
-              "confirmed": true
-            },
-            "weight": 0.4,
-            "min_confidence": 0.9
-          }
-        ]
-      }
-    },
-    {
-      "id": "step_04_combine_and_plate",
-      "sequence": 4,
-      "instruction": "把鸡蛋倒回锅中，加盐和可选的糖，翻炒均匀后关火盛盘。",
-      "objects_involved": [
-        "tomato",
-        "egg",
-        "wok",
-        "spatula",
-        "salt",
-        "plate",
-        "scallion"
-      ],
-      "completion_check": "红色番茄和黄色蛋块混合均匀并已盛入盘中，灶上不再继续加热。",
+      "title": "切好两个番茄",
+      "instruction": "请依次把两个番茄全部切成大小接近的块。",
+      "completion_message": "番茄已经全部切好，接下来可以开始炒鸡蛋。",
+      "objects_involved": ["tomato", "cutting_board", "kitchen_knife"],
+      "completion_check": "两个或以上番茄都已经切成大小接近的块，画面里没有仍待处理的完整番茄。对于有剪辑的视频，若当前帧已经直接进入后续热锅或蛋液下锅阶段且不再进行切番茄，也可确认本步骤已结束。",
       "est_duration_sec": 90,
       "check_policy": "visual_then_confirm",
-      "tips": [
-        "鸡蛋回锅后只需快速拌匀，避免久炒。"
-      ],
-      "failure_modes": [
-        "食物仍在锅中持续加热时不能判定最终完成。"
-      ],
+      "tips": ["先把番茄放稳，再切成大小接近的块。"],
+      "failure_modes": ["仍能看到待切的完整番茄、只切好其中一部分，或手里仍在持续切时，不能判定完成。"],
       "high_risk": true,
       "completion_policy": {
-        "threshold": 0.6,
-        "consecutive_hits": 2,
-        "question_min_score": 0.3,
-        "question_after_ms": 20000,
-        "question": "番茄和鸡蛋已经拌匀、关火并盛盘了吗？",
+        "threshold": 0.75,
+        "consecutive_hits": 1,
+        "question_min_score": 0.1,
+        "question_after_ms": 18000,
+        "question": "两个番茄都已经切成块了吗？",
         "evidence_rules": [
-          {
-            "id": "mixed_color_roi",
-            "event_type": "perception.roi_color",
-            "payload_matches": {
-              "step_id": "step_04_combine_and_plate",
-              "state": "red_yellow_mixed"
-            },
-            "weight": 0.35,
-            "min_confidence": 0.5
-          },
-          {
-            "id": "finish_visual",
-            "event_type": "vlm.step_assessment",
-            "payload_matches": {
-              "step_id": "step_04_combine_and_plate",
-              "phase": "likely_complete"
-            },
-            "weight": 0.5,
-            "min_confidence": 0.6
-          },
-          {
-            "id": "mixed_visual_progress",
-            "event_type": "vlm.step_assessment",
-            "payload_matches": {
-              "step_id": "step_04_combine_and_plate",
-              "phase": "in_progress"
-            },
-            "weight": 0.25,
-            "min_confidence": 0.6
-          },
-          {
-            "id": "finish_plated",
-            "event_type": "perception.objects_present",
-            "payload_matches": {
-              "step_id": "step_04_combine_and_plate",
-              "state": "food_on_plate"
-            },
-            "weight": 0.35,
-            "min_confidence": 0.35
-          },
-          {
-            "id": "finish_confirm",
-            "event_type": "voice.user_confirmation",
-            "payload_matches": {
-              "step_id": "step_04_combine_and_plate",
-              "confirmed": true
-            },
-            "weight": 0.4,
-            "min_confidence": 0.9
-          }
+          {"id": "tomato_cutting_setup", "event_type": "perception.objects_present", "payload_matches": {"step_id": "step_03_cut_tomatoes", "state": "tomato_cutting_setup"}, "weight": 0.15, "min_confidence": 0.3, "advances_confirmation_streak": false},
+          {"id": "cut_in_progress", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_03_cut_tomatoes", "phase": "in_progress"}, "weight": 0.1, "min_confidence": 0.6, "advances_confirmation_streak": false},
+          {"id": "cut_visual_complete", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_03_cut_tomatoes", "phase": "likely_complete"}, "weight": 0.8, "min_confidence": 0.65},
+          {"id": "cut_user_confirm", "event_type": "voice.user_confirmation", "payload_matches": {"step_id": "step_03_cut_tomatoes", "confirmed": true}, "weight": 0.75, "min_confidence": 0.9}
+        ]
+      }
+    },
+    {
+      "id": "step_04_scramble_eggs",
+      "sequence": 4,
+      "title": "炒鸡蛋",
+      "instruction": "请先在锅中倒少量油，再倒入蛋液，用木铲轻轻推动。",
+      "completion_message": "鸡蛋已经基本成形，请先盛回碗中，锅里稍后用来炒番茄。",
+      "objects_involved": ["wok", "oil_bottle", "egg", "bowl", "spatula"],
+      "completion_check": "锅中鸡蛋已经基本凝固成浅黄色块状，不再有明显流动蛋液，并且正在盛出或已经盛回碗中。仅热锅、加油或刚倒入蛋液都不算完成。",
+      "est_duration_sec": 90,
+      "check_policy": "timer_then_visual",
+      "tips": ["蛋液刚凝固时轻推成块，避免久炒变老。"],
+      "failure_modes": ["锅中仍是液态蛋液、只完成热锅加油，或鸡蛋尚未基本成形时，不能判定完成。"],
+      "high_risk": true,
+      "completion_policy": {
+        "threshold": 0.75,
+        "consecutive_hits": 2,
+        "question_min_score": 0.1,
+        "question_after_ms": 20000,
+        "question": "鸡蛋已经基本凝固成块了吗？",
+        "evidence_rules": [
+          {"id": "egg_yellow_roi", "event_type": "perception.roi_color", "payload_matches": {"step_id": "step_04_scramble_eggs", "state": "yellow_dominant"}, "weight": 0.2, "min_confidence": 0.5, "advances_confirmation_streak": false},
+          {"id": "scramble_in_progress", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_04_scramble_eggs", "phase": "in_progress"}, "weight": 0.1, "min_confidence": 0.6, "advances_confirmation_streak": false},
+          {"id": "scramble_visual_complete", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_04_scramble_eggs", "phase": "likely_complete"}, "weight": 0.8, "min_confidence": 0.65},
+          {"id": "scramble_user_confirm", "event_type": "voice.user_confirmation", "payload_matches": {"step_id": "step_04_scramble_eggs", "confirmed": true}, "weight": 0.75, "min_confidence": 0.9}
+        ]
+      }
+    },
+    {
+      "id": "step_05_fry_tomatoes",
+      "sequence": 5,
+      "title": "炒番茄",
+      "instruction": "锅中再加少量油，把切好的番茄全部倒入锅中。加入少量盐和糖，继续翻炒，直到番茄稍微软化并出现少量汤汁。",
+      "completion_message": "番茄已经稍微软化并出现少量汤汁，可以把鸡蛋倒回锅中了。",
+      "objects_involved": ["tomato", "wok", "oil_bottle", "salt", "sugar", "spatula"],
+      "completion_check": "锅中番茄已经稍微软化并出现少量汤汁，同时仍保留清晰的红色块状结构。只有番茄刚下锅、表面仍干且完全生硬时不算完成。",
+      "est_duration_sec": 120,
+      "check_policy": "continuous_evidence",
+      "tips": ["番茄下锅后再加少量盐和糖，翻炒到刚出汁。"],
+      "failure_modes": ["锅里只有鸡蛋、番茄尚未下锅，或番茄刚下锅但没有软化出汁时，不能判定完成。"],
+      "high_risk": true,
+      "completion_policy": {
+        "threshold": 0.75,
+        "consecutive_hits": 2,
+        "question_min_score": 0.1,
+        "question_after_ms": 25000,
+        "question": "番茄已经下锅并稍微软化出汁了吗？",
+        "evidence_rules": [
+          {"id": "tomato_red_roi", "event_type": "perception.roi_color", "payload_matches": {"step_id": "step_05_fry_tomatoes", "state": "red_dominant"}, "weight": 0.2, "min_confidence": 0.5, "advances_confirmation_streak": false},
+          {"id": "tomato_in_progress", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_05_fry_tomatoes", "phase": "in_progress"}, "weight": 0.1, "min_confidence": 0.6, "advances_confirmation_streak": false},
+          {"id": "tomato_visual_complete", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_05_fry_tomatoes", "phase": "likely_complete"}, "weight": 0.8, "min_confidence": 0.65},
+          {"id": "tomato_user_confirm", "event_type": "voice.user_confirmation", "payload_matches": {"step_id": "step_05_fry_tomatoes", "confirmed": true}, "weight": 0.75, "min_confidence": 0.9}
+        ]
+      }
+    },
+    {
+      "id": "step_06_combine",
+      "sequence": 6,
+      "title": "鸡蛋和番茄混合",
+      "instruction": "请把刚才炒好的鸡蛋倒回锅中，轻轻翻拌，让鸡蛋和番茄均匀混合，同时保留清晰的块状。",
+      "completion_message": "鸡蛋和番茄已经均匀混合，可以判断是否关火装盘了。",
+      "objects_involved": ["tomato", "egg", "wok", "spatula"],
+      "completion_check": "黄色鸡蛋块和红色番茄在锅中已经均匀混合，二者仍保留清晰块状，没有明显一侧尚未翻拌到。",
+      "est_duration_sec": 45,
+      "check_policy": "continuous_evidence",
+      "tips": ["鸡蛋回锅后轻轻翻拌，不要把蛋块压碎。"],
+      "failure_modes": ["鸡蛋尚未回锅、只看到单一食材，或红黄两部分明显没有混合时，不能判定完成。"],
+      "high_risk": true,
+      "completion_policy": {
+        "threshold": 0.75,
+        "consecutive_hits": 2,
+        "question_min_score": 0.1,
+        "question_after_ms": 18000,
+        "question": "鸡蛋已经回锅并和番茄均匀混合了吗？",
+        "evidence_rules": [
+          {"id": "mixed_color_roi", "event_type": "perception.roi_color", "payload_matches": {"step_id": "step_06_combine", "state": "red_yellow_mixed"}, "weight": 0.2, "min_confidence": 0.5, "advances_confirmation_streak": false},
+          {"id": "combine_in_progress", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_06_combine", "phase": "in_progress"}, "weight": 0.1, "min_confidence": 0.6, "advances_confirmation_streak": false},
+          {"id": "combine_visual_complete", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_06_combine", "phase": "likely_complete"}, "weight": 0.8, "min_confidence": 0.65},
+          {"id": "combine_user_confirm", "event_type": "voice.user_confirmation", "payload_matches": {"step_id": "step_06_combine", "confirmed": true}, "weight": 0.75, "min_confidence": 0.9}
+        ]
+      }
+    },
+    {
+      "id": "step_07_plate",
+      "sequence": 7,
+      "title": "关火装盘",
+      "instruction": "番茄已经软化，鸡蛋和番茄混合均匀，可以关火装盘了。",
+      "completion_message": "番茄炒蛋制作完成。本次操作已结束。",
+      "objects_involved": ["tomato", "egg", "plate", "wok", "spatula"],
+      "completion_check": "番茄炒蛋已经离开炒锅并完整盛入盘中，锅内不再继续翻炒或加热。食物仍在锅中时不能判定装盘完成。",
+      "est_duration_sec": 45,
+      "check_policy": "visual_then_confirm",
+      "tips": ["确认关火后再端盘，注意锅柄和盘边温度。"],
+      "failure_modes": ["食物仍在锅中持续加热、只关火但尚未装盘，或盘中只有部分成品时，不能判定完成。"],
+      "high_risk": true,
+      "completion_policy": {
+        "threshold": 0.75,
+        "consecutive_hits": 2,
+        "question_min_score": 0.1,
+        "question_after_ms": 18000,
+        "question": "已经关火并装盘完成了吗？",
+        "evidence_rules": [
+          {"id": "food_plated", "event_type": "perception.objects_present", "payload_matches": {"step_id": "step_07_plate", "state": "food_on_plate"}, "weight": 0.2, "min_confidence": 0.3, "advances_confirmation_streak": false},
+          {"id": "plate_in_progress", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_07_plate", "phase": "in_progress"}, "weight": 0.1, "min_confidence": 0.6, "advances_confirmation_streak": false},
+          {"id": "plate_visual_complete", "event_type": "vlm.step_assessment", "payload_matches": {"step_id": "step_07_plate", "phase": "likely_complete"}, "weight": 0.8, "min_confidence": 0.65},
+          {"id": "plate_user_confirm", "event_type": "voice.user_confirmation", "payload_matches": {"step_id": "step_07_plate", "confirmed": true}, "weight": 0.75, "min_confidence": 0.9}
         ]
       }
     }

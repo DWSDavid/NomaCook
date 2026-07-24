@@ -53,15 +53,17 @@ def test_end_event_maps_to_phase_end():
 def test_presence_states_require_all_objects_and_use_min_conf():
     dets = [FakeDet("tomato", 0.8), FakeDet("egg", 0.7), FakeDet("bowl", 0.66)]
     assert presence_states("step_01_prepare", dets) == [
-        ("tomato_egg_tools_ready", 0.66)
+        ("core_ingredients_ready", 0.66)
     ]
     assert presence_states("step_01_prepare", dets[:2]) == []
-    assert presence_states("step_02_scramble_egg", dets) == []
+    assert presence_states("step_02_beat_eggs", dets) == [
+        ("egg_bowl_ready", 0.66)
+    ]
 
 
 def test_objects_present_event_matches_sop_payload_contract():
     env = objects_present_event(
-        "tomato_egg_tools_ready",
+        "core_ingredients_ready",
         0.66,
         session_id="ses_x",
         seq=5,
@@ -72,7 +74,7 @@ def test_objects_present_event_matches_sop_payload_contract():
     assert env.type == "perception.objects_present"
     assert env.payload == {
         "step_id": "step_01_prepare",
-        "state": "tomato_egg_tools_ready",
+        "state": "core_ingredients_ready",
     }
     assert env.confidence == 0.66
     assert env.frame_id == "frame_000090"
@@ -100,7 +102,7 @@ def test_scripted_vlm_and_confirmation_events():
         {
             "pts_ms": 600,
             "type": "voice.user_confirmation",
-            "step_id": "step_02_scramble_egg",
+            "step_id": "step_02_beat_eggs",
         },
         index=1,
         session_id="ses_x",

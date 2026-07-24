@@ -52,17 +52,48 @@ def _concept(
 
 
 CONCEPTS: tuple[ObjectConcept, ...] = (
-    _concept("wok", ("wok", "frying pan"), "cookware", 0.16, ("pan",)),
+    # Extra discriminative phrasings: chest-cam top-down wok reads as "bowl"
+    # to CLIP, so bias the wok prompts toward size/color/handle cues.
+    _concept(
+        "wok",
+        (
+            "large black stovetop wok",
+            "wok with handle",
+            "Chinese wok",
+            "frying pan",
+        ),
+        "cookware",
+        0.16,
+        ("pan", "wok", "black wok"),
+    ),
     _concept("pot", ("cooking pot", "saucepan"), "cookware", 0.18),
     _concept("pot_lid", ("pot lid",), "cookware", 0.18),
-    _concept("spatula", ("cooking spatula", "turner spatula"), "utensil", 0.16),
+    _concept(
+        "spatula",
+        ("wooden cooking spatula", "cooking spatula", "turner spatula"),
+        "utensil",
+        0.16,
+        ("wooden spatula",),
+    ),
     _concept("ladle", ("cooking ladle",), "utensil", 0.18),
     _concept("kitchen_knife", ("kitchen knife", "chef knife"), "utensil", 0.18, ("knife",)),
     _concept("chopsticks", ("chopsticks",), "utensil", 0.18),
     _concept("spoon", ("cooking spoon",), "utensil", 0.18),
     _concept("peeler", ("vegetable peeler",), "utensil", 0.20),
     _concept("scissors", ("kitchen scissors",), "utensil", 0.20),
-    _concept("bowl", ("mixing bowl", "bowl"), "container", 0.16),
+    _concept(
+        "bowl",
+        (
+            "small ingredient bowl",
+            "mixing bowl",
+            "mixing bowl off stove",
+            "ceramic bowl",
+            "bowl",
+        ),
+        "container",
+        0.16,
+        ("small mixing bowl", "mixing bowl", "bowl"),
+    ),
     _concept("plate", ("dinner plate", "plate"), "container", 0.18),
     _concept("cup", ("drinking cup", "cup"), "container", 0.18),
     _concept("cutting_board", ("cutting board",), "container", 0.16),
@@ -77,15 +108,26 @@ CONCEPTS: tuple[ObjectConcept, ...] = (
     _concept("oil_bottle", ("cooking oil bottle", "oil bottle"), "condiment", 0.15, ("oil",)),
     _concept("vinegar_bottle", ("vinegar bottle",), "condiment", 0.16, ("vinegar",)),
     _concept("salt", ("salt shaker", "salt container"), "condiment", 0.18),
+    _concept("sugar", ("sugar container", "white sugar jar"), "condiment", 0.18),
     _concept("pepper", ("pepper shaker", "pepper container"), "condiment", 0.18),
     _concept("seasoning_jar", ("seasoning jar", "spice jar"), "condiment", 0.18),
     _concept("cola_can", ("cola can", "soda can"), "condiment", 0.18),
-    _concept("egg", ("chicken egg", "egg"), "ingredient", 0.16),
+    _concept(
+        "egg",
+        ("chicken egg", "beaten egg in bowl", "scrambled egg pieces", "egg"),
+        "ingredient",
+        0.16,
+    ),
     _concept("rice", ("cooked rice", "rice"), "ingredient", 0.18),
     _concept("scallion", ("green onion", "scallion"), "ingredient", 0.18, ("spring onion",)),
     _concept("garlic", ("garlic clove", "garlic"), "ingredient", 0.18),
     _concept("ginger", ("ginger root", "ginger"), "ingredient", 0.18),
-    _concept("tomato", ("tomato",), "ingredient", 0.16),
+    _concept(
+        "tomato",
+        ("tomato", "chopped tomato pieces", "cooked softened tomato"),
+        "ingredient",
+        0.16,
+    ),
     _concept("potato", ("potato",), "ingredient", 0.16),
     _concept("spinach", ("spinach leaves", "spinach"), "ingredient", 0.18),
     _concept("cabbage", ("cabbage",), "ingredient", 0.17),
@@ -119,6 +161,7 @@ class DetectionTarget(BaseModel):
 
     canonical_label: str
     prompts: tuple[str, ...] = Field(min_length=1)
+    aliases: tuple[str, ...] = ()
     category: Category
     min_confidence: float = Field(ge=0.0, le=1.0)
     role: TargetRole
@@ -141,7 +184,7 @@ class DetectionContext(BaseModel):
         return {
             _normal_form(prompt): target
             for target in self.targets
-            for prompt in target.prompts
+            for prompt in (*target.prompts, *target.aliases, target.canonical_label)
         }
 
 
@@ -149,6 +192,10 @@ BOTTLE_CONFUSERS: dict[str, tuple[str, ...]] = {
     "soy_sauce_bottle": ("oil_bottle", "vinegar_bottle"),
     "oil_bottle": ("soy_sauce_bottle", "vinegar_bottle"),
     "vinegar_bottle": ("soy_sauce_bottle", "oil_bottle"),
+    # A stove-top wok reads as "bowl" from the chest cam. When bowl is a
+    # primary target, also prompt wok so _suppress_confusions has a wok
+    # candidate to win against the false bowl.
+    "bowl": ("wok",),
 }
 
 
@@ -165,6 +212,7 @@ def _target(concept: ObjectConcept, role: TargetRole) -> DetectionTarget:
     return DetectionTarget(
         canonical_label=concept.canonical_label,
         prompts=concept.prompts,
+        aliases=concept.aliases,
         category=concept.category,
         min_confidence=concept.min_confidence,
         role=role,
@@ -355,4 +403,33 @@ def canonicalize_detections(
         ):
             continue
         kept.append(candidate)
-    return kept
+    return _suppress_confusions(kept)
+
+
+# Cross-label suppression: (loser, winner). A top-down wok is CLIP-confusable
+# with a bowl; when both fire on the same region, prefer the wok reading even
+# if the bowl conf is somewhat higher (round rims boost "bowl"). A real bowl
+# keeps a large conf gap over "wok", so the margin protects it.
+_CONFUSION_PAIRS: tuple[tuple[str, str], ...] = (("bowl", "wok"),)
+_CONFUSION_IOU = 0.50
+_CONFUSION_CONF_MARGIN = 0.15
+
+
+def _suppress_confusions(
+    detections: list[ContextDetection],
+) -> list[ContextDetection]:
+    suppressed: set[int] = set()
+    for loser_label, winner_label in _CONFUSION_PAIRS:
+        winners = [d for d in detections if d.canonical_label == winner_label]
+        if not winners:
+            continue
+        for i, det in enumerate(detections):
+            if det.canonical_label != loser_label:
+                continue
+            if any(
+                _iou(det.box, w.box) >= _CONFUSION_IOU
+                and w.conf >= det.conf - _CONFUSION_CONF_MARGIN
+                for w in winners
+            ):
+                suppressed.add(i)
+    return [d for i, d in enumerate(detections) if i not in suppressed]

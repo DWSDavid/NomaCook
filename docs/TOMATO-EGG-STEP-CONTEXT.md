@@ -1,154 +1,27 @@
-# 番茄炒鸡蛋 — 每一步的阐述与系统上下文(核心 Demo 契约)
+# 番茄炒蛋七步上下文契约
 
-> 2026-07-23 · 与代码逐字对齐(`sop/tomato_egg.json` + `server/perception/context.py`
-> + `server/pipeline/evidence.py` + `server/vlm/client.py` + `server/pipeline/narrate.py`)。
-> 本文回答一个问题:**做这道菜的每一步,系统"知道什么、找什么、听什么、说什么、凭什么放行"。**
+> 与 `sop/tomato_egg.json`、画面 overlay、Gemini VLM 和 voiceover 共用同一份七步定义。
 
-## 0. 每一步共用的上下文机器
+## 共同判定规则
 
-任何一步激活时,系统同时持有五份上下文:
+- 本地检测每 3 秒记录一次关键帧状态；Gemini 使用独立的自适应节拍：未开始时每 5 秒检查一次，识别到进行中、待确认或接近完成后每 3 秒检查一次。
+- 下一步预告只在当前步骤达到完成阈值的 85% 后出现，而且明确提醒“等我确认后再开始”。
+- `in_progress` 和单一颜色信号都不能独立完成步骤；烹饪结果通常需要连续两次 `likely_complete`。第一步若已经直接看到打蛋等后续动作，可一次放行，避免因镜头中少摆一个食材而跨过整个打蛋段。
+- VLM 只判断当前步骤。只有 SOP 的完成条件明确允许时，剪辑后已经进入下一阶段的画面才可作为前一步结束的证据。
+- overlay 显示“第 n/7 步 · 标题”，转场旁白使用同一步的 `completion_message`，避免字幕和语音错位。
 
-1. **YOLO 动态词表**:由该步 `objects_involved` 生成,分三色:
-   primary(本步目标物)/ anchor(手,常驻)/ confuser(易混淆物,防误判)。
-   词表外的东西一律不看(小词表=低误检,这是刻意设计)。
-2. **完成判据 `completion_check`**:只写**静态可判定**的结果状态,绝不写动作。
-   它就是发给 VLM 的问题本体。
-3. **证据打分表**:阈值统一 0.7,需**连续 2 个事件**维持达标才放行;
-   分数卡在 `question_min_score` 与 0.7 之间超时 → 系统开口提问。
-4. **VLM 请求包**(触发时):系统提示词(低频视觉确认器,只看图、看不清就降
-   confidence、不许按菜谱常识脑补)+ `decision_id/step_id/context_version/frame_id`
-   (四者必须原样回传,任一不符即判 stale 丢弃)+ 静态完成条件 + 相关物体表 + 当前关键帧。
-5. **配音台词槽**:开场 / 步骤完成 / 卡步提问 / 全部完成,四种时机,事件驱动,绝不碎碎念。
+## 七步映射
 
-通用参数:关键帧采样 3s;VLM TTL 8s、同步骤最小间隔 10s;口头确认需绑定
-transcript,高风险步骤还必须绑定提问事件(防"随口嗯一声就过")。
+| 序号 | ID | 标题 | 主要视觉证据 | 完成后的系统话术 |
+|---|---|---|---|---|
+| 1 | `step_01_prepare` | 准备食材和工具 | 番茄、鸡蛋、碗及备料区域；开始打蛋也能证明准备阶段已结束 | 食材和工具已经齐全，可以开始打鸡蛋了。 |
+| 2 | `step_02_beat_eggs` | 打散鸡蛋 | 碗中蛋黄蛋白混合成均匀蛋液，无完整蛋黄 | 我看到蛋液已经变得均匀，可以开始切番茄了。 |
+| 3 | `step_03_cut_tomatoes` | 切好两个番茄 | 番茄全部成为大小接近的块；仍有整颗番茄时不得完成 | 番茄已经全部切好，接下来可以开始炒鸡蛋。 |
+| 4 | `step_04_scramble_eggs` | 炒鸡蛋 | `yellow_dominant` 仅作弱证据；VLM 必须看到鸡蛋凝固并正在/已经盛出 | 鸡蛋已经基本成形，请先盛回碗中，锅里稍后用来炒番茄。 |
+| 5 | `step_05_fry_tomatoes` | 炒番茄 | `red_dominant` 仅作弱证据；VLM 必须看到软化和少量汤汁 | 番茄已经稍微软化并出现少量汤汁，可以把鸡蛋倒回锅中了。 |
+| 6 | `step_06_combine` | 鸡蛋和番茄混合 | `red_yellow_mixed` 仅作弱证据；红黄食材均匀混合且保留块状 | 鸡蛋和番茄已经均匀混合，可以判断是否关火装盘了。 |
+| 7 | `step_07_plate` | 关火装盘 | 成品离开炒锅并完整盛盘，不再加热 | 番茄炒蛋制作完成。本次操作已结束。 |
 
----
+## test2.mov 的验收边界
 
-## Step 1 · 备料(step_01_prepare)
-
-**指令(开场播报)**:「开始制作番茄炒鸡蛋。第一步,番茄切成小块;鸡蛋打入碗中,加少量盐并搅匀。」
-
-**YOLO 在找什么**(6 概念 9 个 prompt):
-
-| 角色 | 概念 | prompts | 最低置信度 |
-|---|---|---|---|
-| primary | tomato | tomato | 0.16 |
-| primary | egg | chicken egg / egg | 0.16 |
-| primary | bowl | mixing bowl / bowl | 0.16 |
-| primary | cutting_board | cutting board | 0.16 |
-| primary | kitchen_knife | kitchen knife / chef knife | 0.18 |
-| anchor | hand | human hand | 0.25 |
-
-**问 VLM 的判据**:「番茄已切成块,碗中蛋液颜色均匀且没有明显完整蛋黄。」
-(failure_mode 已写进 SOP:只看到完整番茄和鸡蛋 ≠ 备料完成)
-
-**放行数学**(阈值 0.7,连续 2 次):
-
-| 证据 | 事件类型 | 条件 | 权重 |
-|---|---|---|---|
-| 料齐了 | perception.objects_present | 同一关键帧内 tomato+egg+bowl 全部可见,`state=tomato_egg_tools_ready`,conf≥0.65 | +0.3 |
-| VLM 判完成 | vlm.step_assessment | `phase=likely_complete`,conf≥0.75 | +0.4 |
-| 口头确认 | voice.user_confirmation | 需绑定 transcript | +0.3 |
-
-典型放行路径:料齐(0.3)→ 分数进入触发带 → VLM 被唤醒判完成(+0.4)= 0.7
-→ 下个关键帧二连达标 → **不需要人工确认自动过**。
-
-**卡步提问**(分数 0.3-0.7 停留 20 秒):「番茄切好、鸡蛋也打匀了吗?」
-
----
-
-## Step 2 · 炒蛋(step_02_scramble_egg)⚠️ 高风险步骤
-
-**播报**:「这一步完成了。下一步,热锅加油,倒入蛋液,翻炒至鸡蛋凝固成浅黄色块状后盛出。」
-
-**YOLO 在找什么**(9 概念,本步开始出现 confuser):
-
-| 角色 | 概念 | prompts | 最低置信度 |
-|---|---|---|---|
-| primary | wok | wok / frying pan | 0.16 |
-| primary | oil_bottle | cooking oil bottle / oil bottle | 0.15 |
-| primary | egg / bowl / spatula / plate | (同表) | 0.15-0.18 |
-| anchor | hand | human hand | 0.25 |
-| confuser | soy_sauce_bottle | soy sauce bottle / dark condiment bottle | 0.15 |
-| confuser | vinegar_bottle | vinegar bottle | 0.16 |
-
-(confuser 的作用:用户伸手拿瓶子时,把"酱油瓶/醋瓶"显式列进词表,
-避免 YOLO 把它们框成油瓶导致误证据。)
-
-**颜色信号入场**:检测到 wok 后锁定锅 ROI,HSV 统计。
-`yellow_dominant` 定义:黄像素占比 ≥12% 且红 <5%,confidence = yellow/0.30 封顶 1.0。
-
-**问 VLM 的判据**:「鸡蛋已凝固成浅黄色块状并盛出,没有明显液态蛋液或大面积焦褐色。」
-(failure_modes:仍有液态蛋液 → 继续加热;出现焦褐 → 提示关小火)
-
-**放行数学**:
-
-| 证据 | 事件类型 | 条件 | 权重 |
-|---|---|---|---|
-| 锅内变黄 | perception.roi_color | `state=yellow_dominant`,conf≥0.6 | +0.3 |
-| VLM 判完成 | vlm.step_assessment | likely_complete,conf≥0.75 | +0.4 |
-| 口头确认 | voice.user_confirmation | **高风险:必须绑定系统提问** | +0.3 |
-
-**卡步提问**(20 秒):「鸡蛋已经凝固成块并盛出来了吗?」
-
----
-
-## Step 3 · 炒软番茄(step_03_soften_tomato)⚠️ 高风险步骤
-
-**播报**:「这一步完成了。下一步,把番茄块倒入锅中,翻炒并轻压,直到番茄明显软化出汁。」
-
-**YOLO 在找什么**(4 概念,全程最小词表):tomato / wok / spatula(primary)+ hand(anchor)。
-
-**颜色信号**:`red_dominant` = 红 ≥12% 且黄 <5%(HSV 双段红区 0-12 + 168-179)。
-
-**问 VLM 的判据**:「锅中番茄边缘已软化并出现可见汤汁,仍保留部分红色块状结构。」
-(failure_mode:只有干燥完整番茄块 ≠ 软化)
-
-**放行数学**(注意本步权重刻意调低颜色、调高 VLM,因为"红"不等于"软"):
-
-| 证据 | 事件类型 | 条件 | 权重 |
-|---|---|---|---|
-| 锅内变红 | perception.roi_color | `state=red_dominant`,conf≥0.6 | **+0.2** |
-| VLM 判完成 | vlm.step_assessment | likely_complete,conf≥0.75 | **+0.5** |
-| 口头确认 | voice.user_confirmation | 高风险,须绑提问 | +0.3 |
-
-**卡步提问**(本步放宽到 25 秒,触发带下限降到 0.2,因为炖炒过程证据天然稀疏):
-「番茄已经炒软并开始出汁了吗?」
-
----
-
-## Step 4 · 合炒装盘(step_04_combine_and_plate)⚠️ 高风险步骤
-
-**播报**:「这一步完成了。下一步,把鸡蛋倒回锅中,加盐和可选的糖,翻炒均匀后关火盛盘。」
-
-**YOLO 在找什么**(8 概念,全程最大词表):tomato / egg / wok / spatula / salt /
-plate / scallion(primary)+ hand(anchor)。
-
-**颜色信号**:`red_yellow_mixed` = 红 ≥6% 且黄 ≥6%,confidence = (红+黄)/0.35。
-
-**问 VLM 的判据**:「红色番茄和黄色蛋块混合均匀并已盛入盘中,灶上不再继续加热。」
-(failure_mode:食物仍在锅中加热 ≠ 最终完成——这条是防"提前庆祝"的关键)
-
-**放行数学**(唯一有 4 条规则的步骤):
-
-| 证据 | 事件类型 | 条件 | 权重 |
-|---|---|---|---|
-| 红黄混合 | perception.roi_color | `state=red_yellow_mixed`,conf≥0.6 | +0.3 |
-| VLM 判完成 | vlm.step_assessment | likely_complete,conf≥0.75 | +0.4 |
-| 已经上盘 | perception.objects_present | 同帧 plate+wok 可见,`state=food_on_plate`,conf≥0.7 | +0.3 |
-| 口头确认 | voice.user_confirmation | 高风险,须绑提问 | +0.3 |
-
-**卡步提问**(20 秒):「番茄和鸡蛋已经拌匀、关火并盛盘了吗?」
-
-**完成播报**:「全部步骤完成,可以盛盘上桌了。妈,我会做饭了。」
-
----
-
-## 附:为什么这套上下文"抄不走"
-
-单看任何一条信号都平平无奇;壁垒在于每一步的**多信号交集**:词表按步收缩
-(误检率随词表大小下降)× 颜色只在锁定的锅 ROI 里比(人走动不影响)×
-VLM 只答封闭问题且四个 ID 对不上就作废(幻觉进不了状态机)× 高风险步骤的
-确认必须绑定提问(随口应付无效)。误判率是相乘关系,每加一层就降一个量级,
-而全系统零自训模型。
+这段素材实际使用约四个番茄和五个鸡蛋，且没有拍到炒番茄、混合、装盘。它只能验证七步状态机能按真实画面推进到第 5 步未开始，不能用脚本伪造第 5–7 步完成。

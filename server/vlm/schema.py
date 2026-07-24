@@ -25,6 +25,10 @@ class VLMDecisionRequest(BaseModel):
     expires_at: datetime
     completion_check: str = Field(min_length=1)
     expected_objects: tuple[str, ...] = ()
+    dish_name: str = ""
+    step_instruction: str = ""
+    failure_modes: tuple[str, ...] = ()
+    detection_context: str = ""
 
     @field_validator("requested_at", "expires_at")
     @classmethod
@@ -51,6 +55,10 @@ class VLMDecisionRequest(BaseModel):
         requested_at: datetime,
         completion_check: str,
         expected_objects: tuple[str, ...] = (),
+        dish_name: str = "",
+        step_instruction: str = "",
+        failure_modes: tuple[str, ...] = (),
+        detection_context: str = "",
         ttl_seconds: int = DEFAULT_VLM_TTL_SECONDS,
     ) -> "VLMDecisionRequest":
         return cls(
@@ -63,6 +71,10 @@ class VLMDecisionRequest(BaseModel):
             expires_at=requested_at + timedelta(seconds=ttl_seconds),
             completion_check=completion_check,
             expected_objects=expected_objects,
+            dish_name=dish_name,
+            step_instruction=step_instruction,
+            failure_modes=failure_modes,
+            detection_context=detection_context,
         )
 
 
@@ -81,6 +93,9 @@ class VLMObservation(BaseModel):
     risk_level: Literal["none", "warning", "critical"] = "none"
     risk_reason: str | None = None
     reason: str = Field(min_length=1, max_length=300)
+    # CLAUDE.md §2 巡检第4问:"有什么值得主动说的?" 一句话或 null。
+    # 这是用户能"听见 Gemini"的通道;None 表示这张图没什么可说的。
+    coach_comment: str | None = Field(default=None, max_length=120)
 
 
 class ValidatedVLMResult(BaseModel):

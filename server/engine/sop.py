@@ -23,6 +23,7 @@ class EvidenceRule(BaseModel):
     payload_matches: dict[str, Any] = Field(default_factory=dict)
     weight: float = Field(gt=0.0, le=1.0)
     min_confidence: float = Field(ge=0.0, le=1.0)
+    advances_confirmation_streak: bool = True
 
 
 class CompletionPolicy(BaseModel):
@@ -52,7 +53,9 @@ class RecipeStep(BaseModel):
 
     id: str = Field(min_length=1)
     sequence: int = Field(ge=1)
+    title: str = ""
     instruction: str = Field(min_length=1)
+    completion_message: str | None = None
     objects_involved: tuple[str, ...] = ()
     completion_check: str = Field(min_length=1)
     est_duration_sec: int = Field(ge=1)

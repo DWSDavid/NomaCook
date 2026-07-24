@@ -1,14 +1,13 @@
 [
-  {"pts_ms": 200,  "type": "vlm.step_assessment",     "step_id": "step_01_prepare",           "phase": "likely_complete", "confidence": 0.85},
-  {"pts_ms": 400,  "type": "voice.user_confirmation", "step_id": "step_01_prepare"},
-  {"pts_ms": 600,  "type": "vlm.step_assessment",     "step_id": "step_01_prepare",           "phase": "likely_complete", "confidence": 0.85},
-  {"pts_ms": 800,  "type": "vlm.step_assessment",     "step_id": "step_02_scramble_egg",      "phase": "likely_complete", "confidence": 0.85},
-  {"pts_ms": 1000, "type": "voice.user_confirmation", "step_id": "step_02_scramble_egg"},
-  {"pts_ms": 1200, "type": "vlm.step_assessment",     "step_id": "step_02_scramble_egg",      "phase": "likely_complete", "confidence": 0.85},
-  {"pts_ms": 1400, "type": "vlm.step_assessment",     "step_id": "step_03_soften_tomato",     "phase": "likely_complete", "confidence": 0.85},
-  {"pts_ms": 1600, "type": "voice.user_confirmation", "step_id": "step_03_soften_tomato"},
-  {"pts_ms": 1800, "type": "vlm.step_assessment",     "step_id": "step_03_soften_tomato",     "phase": "likely_complete", "confidence": 0.85},
-  {"pts_ms": 2000, "type": "vlm.step_assessment",     "step_id": "step_04_combine_and_plate", "phase": "likely_complete", "confidence": 0.85},
-  {"pts_ms": 2200, "type": "voice.user_confirmation", "step_id": "step_04_combine_and_plate"},
-  {"pts_ms": 2400, "type": "vlm.step_assessment",     "step_id": "step_04_combine_and_plate", "phase": "likely_complete", "confidence": 0.85}
+  {"pts_ms": 100,  "type": "vlm.step_assessment", "step_id": "step_01_prepare",        "phase": "likely_complete", "confidence": 0.85},
+  {"pts_ms": 200,  "type": "vlm.step_assessment", "step_id": "step_02_beat_eggs",      "phase": "likely_complete", "confidence": 0.85},
+  {"pts_ms": 300,  "type": "vlm.step_assessment", "step_id": "step_03_cut_tomatoes",  "phase": "likely_complete", "confidence": 0.85},
+  {"pts_ms": 400,  "type": "vlm.step_assessment", "step_id": "step_04_scramble_eggs", "phase": "likely_complete", "confidence": 0.85},
+  {"pts_ms": 500,  "type": "vlm.step_assessment", "step_id": "step_04_scramble_eggs", "phase": "likely_complete", "confidence": 0.85},
+  {"pts_ms": 600,  "type": "vlm.step_assessment", "step_id": "step_05_fry_tomatoes",  "phase": "likely_complete", "confidence": 0.85},
+  {"pts_ms": 700,  "type": "vlm.step_assessment", "step_id": "step_05_fry_tomatoes",  "phase": "likely_complete", "confidence": 0.85},
+  {"pts_ms": 800,  "type": "vlm.step_assessment", "step_id": "step_06_combine",       "phase": "likely_complete", "confidence": 0.85},
+  {"pts_ms": 900,  "type": "vlm.step_assessment", "step_id": "step_06_combine",       "phase": "likely_complete", "confidence": 0.85},
+  {"pts_ms": 1000, "type": "vlm.step_assessment", "step_id": "step_07_plate",         "phase": "likely_complete", "confidence": 0.85},
+  {"pts_ms": 1100, "type": "vlm.step_assessment", "step_id": "step_07_plate",         "phase": "likely_complete", "confidence": 0.85}
 ]

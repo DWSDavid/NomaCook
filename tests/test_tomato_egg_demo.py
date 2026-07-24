@@ -41,15 +41,31 @@ def event(seq: int, event_type: str, payload: dict, confidence: float = 0.9):
     )
 
 
-def test_tomato_egg_is_the_simple_four_step_demo() -> None:
+def test_tomato_egg_is_the_exact_seven_step_demo() -> None:
     recipe = load_recipe("sop/tomato_egg.json")
-    assert recipe.dish == "番茄炒鸡蛋"
+    assert recipe.dish == "番茄炒蛋"
     assert [step.id for step in recipe.steps] == [
         "step_01_prepare",
-        "step_02_scramble_egg",
-        "step_03_soften_tomato",
-        "step_04_combine_and_plate",
+        "step_02_beat_eggs",
+        "step_03_cut_tomatoes",
+        "step_04_scramble_eggs",
+        "step_05_fry_tomatoes",
+        "step_06_combine",
+        "step_07_plate",
     ]
+    assert [step.title for step in recipe.steps] == [
+        "准备食材和工具",
+        "打散鸡蛋",
+        "切好两个番茄",
+        "炒鸡蛋",
+        "炒番茄",
+        "鸡蛋和番茄混合",
+        "关火装盘",
+    ]
+    assert recipe.steps[0].instruction.startswith("请准备两个番茄、两个鸡蛋")
+    assert recipe.steps[1].instruction == "请把两个鸡蛋打入碗中，再用筷子搅拌均匀。"
+    assert recipe.steps[2].instruction == "请依次把两个番茄全部切成大小接近的块。"
+    assert recipe.steps[-1].completion_message == "番茄炒蛋制作完成。本次操作已结束。"
 
     first = recipe.steps[0]
     context = SessionContext(
@@ -80,54 +96,85 @@ def test_hsv_signals_separate_red_yellow_and_mixed_states() -> None:
     assert dark.state == "uncertain"
 
 
-def test_yellow_roi_signal_is_only_partial_evidence_for_cooked_egg() -> None:
+def test_in_progress_cannot_finish_a_step_and_yellow_is_only_partial_evidence() -> None:
     recipe = load_recipe("sop/tomato_egg.json")
     engine = StateEngine(
         session_id="ses_tomato_egg", recipe=recipe, started_at=NOW
     )
 
-    # Complete preparation with independent object + VLM evidence and one repeat.
+    # Repeated in-progress signals plus object presence must not recreate the
+    # old false advance: only a visually complete result may cross threshold.
     engine.consume(
         event(
             1,
             "perception.objects_present",
-            {"step_id": "step_01_prepare", "state": "tomato_egg_tools_ready"},
+            {"step_id": "step_01_prepare", "state": "core_ingredients_ready"},
         )
     )
-    engine.consume(
-        event(
-            2,
-            "vlm.step_assessment",
-            {"step_id": "step_01_prepare", "phase": "likely_complete"},
+    for seq in (2, 3):
+        result = engine.consume(
+            event(
+                seq,
+                "vlm.step_assessment",
+                {"step_id": "step_01_prepare", "phase": "in_progress"},
+            )
         )
-    )
-    advanced = engine.consume(
-        event(
-            3,
-            "vlm.step_assessment",
-            {"step_id": "step_01_prepare", "phase": "likely_complete"},
-        )
-    )
-    assert advanced.context.current_step_id == "step_02_scramble_egg"
+        assert result.context.current_step_id == "step_01_prepare"
+
+    engine.consume(event(4, "vlm.step_assessment", {
+        "step_id": "step_01_prepare", "phase": "likely_complete"}))
+    advanced = engine.context
+    assert advanced.current_step_id == "step_02_beat_eggs"
+
+    # Advance the result-only prep stages to the real cooking step.
+    for seq, step_id in (
+        (5, "step_02_beat_eggs"),
+        (6, "step_03_cut_tomatoes"),
+    ):
+        engine.consume(event(seq, "vlm.step_assessment", {
+            "step_id": step_id, "phase": "likely_complete"}))
+    assert engine.context.current_step_id == "step_04_scramble_eggs"
 
     signals = extract_tomato_egg_color_signals(solid_bgr((0, 255, 255)))
     color_event = create_color_evidence_event(
         signals,
         session_id="ses_tomato_egg",
-        seq=4,
-        step_id="step_02_scramble_egg",
-        frame_id="frm_4",
-        t_device_ms=400,
-        t_server_est=NOW + timedelta(milliseconds=400),
-        received_at=NOW + timedelta(milliseconds=400),
+        seq=7,
+        step_id="step_04_scramble_eggs",
+        frame_id="frm_7",
+        t_device_ms=700,
+        t_server_est=NOW + timedelta(milliseconds=700),
+        received_at=NOW + timedelta(milliseconds=700),
     )
     result = engine.consume(color_event)
     assert result.status == "evidence_added"
-    step2 = next(s for s in engine.recipe.steps if s.id == "step_02_scramble_egg")
+    step4 = next(s for s in engine.recipe.steps if s.id == "step_04_scramble_eggs")
     yellow_rule = next(
-        r for r in step2.completion_policy.evidence_rules if r.id == "egg_yellow_roi"
+        r for r in step4.completion_policy.evidence_rules if r.id == "egg_yellow_roi"
     )
     assert result.context.step_progress.score == pytest.approx(yellow_rule.weight)
     # The point under test: yellow ROI alone must stay below the threshold.
-    assert yellow_rule.weight < step2.completion_policy.threshold
-    assert result.context.current_step_id == "step_02_scramble_egg"
+    assert yellow_rule.weight < step4.completion_policy.threshold
+    assert result.context.current_step_id == "step_04_scramble_eggs"
+
+    first_visual = engine.consume(event(8, "vlm.step_assessment", {
+        "step_id": "step_04_scramble_eggs", "phase": "likely_complete"}))
+    assert first_visual.context.step_progress.consecutive_hits == 1
+
+    weak_color_again = create_color_evidence_event(
+        signals,
+        session_id="ses_tomato_egg",
+        seq=9,
+        step_id="step_04_scramble_eggs",
+        frame_id="frm_9",
+        t_device_ms=900,
+        t_server_est=NOW + timedelta(milliseconds=900),
+        received_at=NOW + timedelta(milliseconds=900),
+    )
+    still_step4 = engine.consume(weak_color_again)
+    assert still_step4.context.step_progress.consecutive_hits == 1
+    assert still_step4.context.current_step_id == "step_04_scramble_eggs"
+
+    second_visual = engine.consume(event(10, "vlm.step_assessment", {
+        "step_id": "step_04_scramble_eggs", "phase": "likely_complete"}))
+    assert second_visual.context.current_step_id == "step_05_fry_tomatoes"

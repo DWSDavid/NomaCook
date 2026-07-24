@@ -194,7 +194,8 @@ class StateEngine:
         uncertain_since = progress.uncertain_since
         if rules:
             if score >= step.completion_policy.threshold:
-                consecutive_hits += 1
+                if any(rule.advances_confirmation_streak for rule in rules):
+                    consecutive_hits += 1
             else:
                 consecutive_hits = 0
             if (

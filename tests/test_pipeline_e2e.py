@@ -19,11 +19,15 @@ def _run(tmp_out: str) -> Path:
         shutil.rmtree(stale, ignore_errors=True)  # leftovers from failed runs
     cmd = [str(PY), "harness/run_pipeline.py",
            "--source", str(VIDEO), "--device", "cpu",
+           "--vlm", "off",
            "--script", str(SCRIPT), "--run-tag", tmp_out,
            "--max-frames", "90", "--keyframe-interval", "1.0"]
     subprocess.run(cmd, cwd=REPO, check=True, capture_output=True, text=True)
-    session_dir = next((REPO / "data" / "sessions").glob("*synthetic_smoke*"))
-    return session_dir / f"run_{tmp_out}"
+    return next(
+        (REPO / "data" / "sessions").glob(
+            f"*synthetic_smoke*/run_{tmp_out}"
+        )
+    )
 
 
 @pytest.mark.e2e
@@ -42,7 +46,7 @@ def test_full_pipeline_is_deterministic_and_produces_all_artifacts():
 
         meta = json.loads((left / "meta.json").read_text())
         assert meta["final_status"] == "completed"
-        assert len(meta["transitions"]) == 4
+        assert len(meta["transitions"]) == 7
         assert meta["annotated_frames"] == meta["frames"]
         assert (left / "annotated.mp4").stat().st_size > 0
         timeline_rows = (left / "timeline.jsonl").read_text().splitlines()

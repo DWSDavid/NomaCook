@@ -6,17 +6,16 @@ import argparse
 import asyncio
 import contextlib
 from functools import partial
-import os
-from pathlib import Path
 import signal
 import sys
 from typing import Any
 
 import cv2
-from dotenv import dotenv_values
 from google import genai
 from google.genai import types
 import sounddevice as sd
+
+from server.gemini_config import gemini_api_key, gemini_setting
 
 
 DEFAULT_MODEL = "gemini-3.1-flash-live-preview"
@@ -25,12 +24,22 @@ OUTPUT_SAMPLE_RATE = 24_000
 DEFAULT_FRAME_INTERVAL = 1.0
 
 SYSTEM_INSTRUCTION = """
-你是 NomaChef 的实时厨房视觉与语音助手。始终用简洁、自然的中文回答。
-你会持续收到用户摄像头的低帧率画面和麦克风音频。回答视觉问题时，只描述画面中
-确实可见的内容，优先关注厨房相关的物体、容器、食材、手部动作、灶台状态和明显的
-安全风险；无法确认时明确说不确定，不要臆测步骤已经完成。默认回答控制在 2 至 4 句，
-用户要求详细说明时再展开。不要仅因收到新画面就不断主动说话；等待用户提问，或响应
-启动时的一次场景描述请求。
+你是 NomaChef 的实时厨房对话层。状态引擎和低频视觉判别器负责步骤推进；你负责听懂
+用户、自然回答和播报已获准的提示，不能凭聊天印象自行宣布完成或切换步骤。
+
+时机规则（优先级最高）：
+- 用户仍在做当前动作时，只围绕当前动作回答，不提前讲下一步。
+- 只有收到带有 [STEP_NEAR_COMPLETE] 的系统文本，或用户明确说当前步骤已经完成，
+  才可以简短预告下一步；即使预告，也要说“先把手上动作做完”，不要催促切换。
+- 只有收到 [STEP_COMPLETED] 才能把下一步说成当前任务。
+
+你会持续收到低帧率画面和麦克风音频。只描述画面中确实可见的内容。区分锅和碗时，
+不要只看圆形轮廓：灶台上的大号深色金属容器、有长柄或正在受热的优先判断为炒锅；
+离开灶台、较小、装蛋液或备料的优先判断为碗。不确定就直接说不确定。
+
+语气像熟悉的朋友在厨房搭把手：口语、松弛、短句，有自然停顿，不用“根据画面显示”
+之类的 AI 套话，不复述规则。默认 1 至 2 句，用户要求详细说明时再展开。不要仅因收到
+新画面就不断主动说话；等待用户提问或明确的系统播报事件。
 """.strip()
 
 DEFAULT_INITIAL_PROMPT = (
@@ -40,15 +49,7 @@ DEFAULT_INITIAL_PROMPT = (
 
 
 def _api_key() -> str:
-    key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if not key and Path(".env").is_file():
-        key = str(dotenv_values(".env").get("GEMINI_API_KEY") or "").strip()
-    if not key:
-        raise RuntimeError(
-            "GEMINI_API_KEY 未配置。请把已有 key 写入仓库根目录的本地 .env；"
-            "不要把 key 提交到 Git 或粘贴到聊天中。"
-        )
-    return key
+    return gemini_api_key()
 
 
 def _camera_source(value: str) -> int | str:
@@ -269,6 +270,13 @@ async def run(args: argparse.Namespace) -> None:
     config = types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],
         system_instruction=SYSTEM_INSTRUCTION,
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                    voice_name=args.voice
+                )
+            )
+        ),
         input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
         media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW,
@@ -279,7 +287,7 @@ async def run(args: argparse.Namespace) -> None:
     height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
     print(
         f"连接 {args.model}；视频源={args.source}，分辨率={width}x{height}，"
-        f"发送间隔={args.frame_interval:.1f}s"
+        f"发送间隔={args.frame_interval:.1f}s，音色={args.voice}"
     )
     print("请优先使用耳机避免扬声器回灌；按 q 或 Ctrl-C 结束。")
 
@@ -387,7 +395,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="NomaChef 本地摄像头 + 麦克风 Gemini Live 整合测试"
     )
     parser.add_argument("--source", default="0", help="摄像头序号或视频路径")
-    parser.add_argument("--model", default=os.getenv("GEMINI_LIVE_MODEL", DEFAULT_MODEL))
+    parser.add_argument(
+        "--model", default=gemini_setting("GEMINI_LIVE_MODEL", DEFAULT_MODEL)
+    )
+    parser.add_argument(
+        "--voice", default=gemini_setting("GEMINI_LIVE_VOICE", "Aoede")
+    )
     parser.add_argument(
         "--duration",
         type=float,
