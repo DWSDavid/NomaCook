@@ -1,0 +1,141 @@
+{
+  "schema_version": "1.0",
+  "recipe_version_id": "rv_live_demo_1",
+  "dish": "番茄炒蛋(现场简版)",
+  "language": "zh-CN",
+  "ingredients": [
+    { "name": "番茄", "amount": "1 个" },
+    { "name": "鸡蛋", "amount": "1 个" }
+  ],
+  "steps": [
+    {
+      "id": "step_01_prepare",
+      "sequence": 1,
+      "title": "准备食材",
+      "instruction": "把一个番茄和一个鸡蛋放到面前的桌面上。",
+      "objects_involved": ["tomato", "egg"],
+      "completion_check": "画面里同时能看到一个番茄和一个鸡蛋。",
+      "completion_message": "食材齐了。",
+      "est_duration_sec": 30,
+      "check_policy": "visual_then_confirm",
+      "tips": ["番茄和鸡蛋都放在摄像头看得到的地方。"],
+      "high_risk": false,
+      "completion_policy": {
+        "threshold": 0.4,
+        "consecutive_hits": 1,
+        "question_min_score": 0.25,
+        "question_after_ms": 12000,
+        "question": "番茄和鸡蛋都准备好了吗?",
+        "evidence_rules": [
+          {
+            "id": "prep_present",
+            "event_type": "perception.objects_present",
+            "payload_matches": { "step_id": "step_01_prepare", "state": "ready" },
+            "weight": 0.45,
+            "min_confidence": 0.3
+          },
+          {
+            "id": "prep_vlm",
+            "event_type": "vlm.step_assessment",
+            "payload_matches": { "step_id": "step_01_prepare", "phase": "likely_complete" },
+            "weight": 0.45,
+            "min_confidence": 0.4
+          },
+          {
+            "id": "prep_confirm",
+            "event_type": "voice.user_confirmation",
+            "payload_matches": { "step_id": "step_01_prepare", "confirmed": true },
+            "weight": 0.7,
+            "min_confidence": 0.8
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_02_cut_tomato",
+      "sequence": 2,
+      "title": "切番茄",
+      "instruction": "把番茄切成小块。",
+      "objects_involved": ["tomato", "kitchen knife", "cutting board"],
+      "completion_check": "番茄已经被切开成几块,不再是一个完整的番茄。",
+      "completion_message": "番茄切好了。",
+      "est_duration_sec": 60,
+      "check_policy": "visual_then_confirm",
+      "tips": ["切几刀就行,不用很规整。"],
+      "high_risk": false,
+      "completion_policy": {
+        "threshold": 0.4,
+        "consecutive_hits": 1,
+        "question_min_score": 0.25,
+        "question_after_ms": 15000,
+        "question": "番茄切好了吗?",
+        "evidence_rules": [
+          {
+            "id": "cut_vlm_done",
+            "event_type": "vlm.step_assessment",
+            "payload_matches": { "step_id": "step_02_cut_tomato", "phase": "likely_complete" },
+            "weight": 0.5,
+            "min_confidence": 0.4
+          },
+          {
+            "id": "cut_vlm_progress",
+            "event_type": "vlm.step_assessment",
+            "payload_matches": { "step_id": "step_02_cut_tomato", "phase": "in_progress" },
+            "weight": 0.2,
+            "min_confidence": 0.4
+          },
+          {
+            "id": "cut_confirm",
+            "event_type": "voice.user_confirmation",
+            "payload_matches": { "step_id": "step_02_cut_tomato", "confirmed": true },
+            "weight": 0.7,
+            "min_confidence": 0.8
+          }
+        ]
+      }
+    },
+    {
+      "id": "step_03_beat_egg",
+      "sequence": 3,
+      "title": "打鸡蛋",
+      "instruction": "把鸡蛋打入碗中,搅匀成蛋液。",
+      "objects_involved": ["egg", "bowl", "chopsticks"],
+      "completion_check": "碗里是搅匀的蛋液,看不到完整的蛋黄。",
+      "completion_message": "蛋液打好了。",
+      "est_duration_sec": 45,
+      "check_policy": "visual_then_confirm",
+      "tips": ["搅到蛋黄蛋清混匀就行。"],
+      "high_risk": false,
+      "completion_policy": {
+        "threshold": 0.4,
+        "consecutive_hits": 1,
+        "question_min_score": 0.25,
+        "question_after_ms": 15000,
+        "question": "鸡蛋打匀了吗?",
+        "evidence_rules": [
+          {
+            "id": "beat_vlm_done",
+            "event_type": "vlm.step_assessment",
+            "payload_matches": { "step_id": "step_03_beat_egg", "phase": "likely_complete" },
+            "weight": 0.5,
+            "min_confidence": 0.4
+          },
+          {
+            "id": "beat_vlm_progress",
+            "event_type": "vlm.step_assessment",
+            "payload_matches": { "step_id": "step_03_beat_egg", "phase": "in_progress" },
+            "weight": 0.2,
+            "min_confidence": 0.4
+          },
+          {
+            "id": "beat_confirm",
+            "event_type": "voice.user_confirmation",
+            "payload_matches": { "step_id": "step_03_beat_egg", "confirmed": true },
+            "weight": 0.7,
+            "min_confidence": 0.8
+          }
+        ]
+      }
+    }
+  ]
+}
