@@ -1,4 +1,4 @@
-# NomaChef 诺妈
+# NomaChef
 
 > **Mom, I cooked.** 「妈,我会做饭了。」
 
