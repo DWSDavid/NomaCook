@@ -1,6 +1,6 @@
 # API Key 配置指引
 
-本项目需要 Gemini、USDA FoodData Central 和 Supabase 三组配置。注册完成后，把 `.env.example` 复制为本地 `.env` 并填写真实值；不要把 `.env`、截图或真实 key 提交到 Git，也不要在聊天或日志中粘贴 key。
+本项目按功能选用 Gemini、科大讯飞、USDA FoodData Central 和 Supabase。注册完成后，把 `.env.example` 复制为本地 `.env` 并填写真实值；不要把 `.env`、截图或真实 key 提交到 Git，也不要在聊天或日志中粘贴 key。
 
 ## 1. Gemini API
 
@@ -12,7 +12,25 @@
 4. 将 key 填入本地 `.env` 的 `GEMINI_API_KEY`。
 5. 若控制台提供 key 限制，按项目需要限制可用 API，并定期轮换泄露或不再使用的 key。
 
-## 2. USDA FoodData Central API
+## 2. 科大讯飞流式语音与机器翻译
+
+入口：[讯飞开放平台控制台](https://console.xfyun.cn/)
+
+1. 创建 WebAPI 应用，开通“在线语音合成（流式版）”，取得 `APPID`、`APIKey` 和 `APISecret`。
+2. 将三项分别填入 `IFLYTEK_APP_ID`、`IFLYTEK_API_KEY`、`IFLYTEK_API_SECRET`。
+3. 在控制台为应用添加实际使用的发音人。中文默认参数为 `x4_yezi`（小露）；若账号显示的参数不同，用 `IFLYTEK_TTS_VOICE_ZH_CN` 覆盖。
+4. 英文或其他语言必须开通对应发音人，并填写相应变量，例如 `IFLYTEK_TTS_VOICE_EN_US`。TTS 的语种由发音人决定，不是仅靠语言代码切换。
+5. 非中文旁白还需要开通“机器翻译”。若该产品给出独立密钥，则填写 `IFLYTEK_MT_APP_ID`、`IFLYTEK_MT_API_KEY`、`IFLYTEK_MT_API_SECRET`；否则留空并复用通用三项。
+
+在线 TTS 使用签名 WebSocket URL。代码和日志不得保存完整 URL，因为查询参数中包含临时鉴权信息。
+
+只检查讯飞配置是否存在：
+
+```bash
+.venv/bin/python -c "from server.iflytek_config import iflytek_is_configured; print('configured' if iflytek_is_configured() else 'missing')"
+```
+
+## 3. USDA FoodData Central API
 
 入口：[FoodData Central API key signup](https://fdc.nal.usda.gov/api-key-signup.html)
 
@@ -21,7 +39,7 @@
 3. 将 key 填入本地 `.env` 的 `USDA_FDC_API_KEY`。
 4. 不要把 key 写入菜谱、测试 fixture 或客户端代码。
 
-## 3. Supabase
+## 4. Supabase
 
 入口：[Supabase](https://supabase.com)
 

@@ -96,8 +96,46 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         help="auto enables Gemini when GEMINI_API_KEY is configured",
     )
-    ap.add_argument("--narrate", choices=["off", "say", "gemini"], default="off")
+    ap.add_argument(
+        "--narrate",
+        choices=["off", "say", "gemini", "iflytek"],
+        default="off",
+    )
     ap.add_argument("--voice", default="Tingting", help="say backend voice")
+    ap.add_argument(
+        "--language",
+        default="zh-CN",
+        help="iFLYTEK narration target language, for example zh-CN or en-US",
+    )
+    ap.add_argument(
+        "--iflytek-voice",
+        default=None,
+        help="console-authorized iFLYTEK vcn; defaults to the language env setting",
+    )
+    ap.add_argument(
+        "--iflytek-speed",
+        type=int,
+        choices=range(101),
+        default=50,
+        metavar="0-100",
+        help="iFLYTEK speaking speed (default: 50)",
+    )
+    ap.add_argument(
+        "--iflytek-volume",
+        type=int,
+        choices=range(101),
+        default=50,
+        metavar="0-100",
+        help="iFLYTEK volume (default: 50)",
+    )
+    ap.add_argument(
+        "--iflytek-pitch",
+        type=int,
+        choices=range(101),
+        default=50,
+        metavar="0-100",
+        help="iFLYTEK pitch (default: 50)",
+    )
     return ap
 
 
@@ -108,11 +146,29 @@ def run(args: argparse.Namespace) -> dict:
         raise SystemExit("--keyframe-interval and --vlm-interval must be positive")
     if not 0.5 <= args.preview_band <= 1.0:
         raise SystemExit("--preview-band must be between 0.5 and 1.0")
+    if args.narrate == "iflytek":
+        from server.iflytek_config import (
+            iflytek_credentials,
+            iflytek_mt_credentials,
+            iflytek_tts_voice,
+            normalize_language,
+        )
+        from server.voice.iflytek_translate import translation_language_code
+
+        try:
+            language = normalize_language(args.language)
+            iflytek_credentials()
+            iflytek_tts_voice(language, args.iflytek_voice)
+            if translation_language_code(language) != "cn":
+                iflytek_mt_credentials()
+        except RuntimeError as exc:
+            raise SystemExit(f"iFLYTEK configuration error: {exc}") from None
 
     video = Path(args.source)
     if not video.is_file():
         raise SystemExit(f"--source must be an existing video file: {video}")
     recipe = load_recipe(args.sop)
+    session_language = language if args.narrate == "iflytek" else recipe.language
     session_id = session_id_for(video, recipe.recipe_version_id)
     paths = create_run_dir(session_id, run_tag=args.run_tag)
     print(f"session={session_id}\nrun dir={paths.root}")
@@ -133,7 +189,10 @@ def run(args: argparse.Namespace) -> dict:
     recent_event_texts: list[str] = []
 
     engine = StateEngine(
-        session_id=session_id, recipe=recipe, started_at=SESSION_EPOCH
+        session_id=session_id,
+        recipe=recipe,
+        started_at=SESSION_EPOCH,
+        user_preferences={"language": session_language, "verbosity": "short"},
     )
     demo = DemoLogger(enabled=args.demo_log)
     first_step = engine.current_step
@@ -549,7 +608,17 @@ def run(args: argparse.Namespace) -> dict:
     if args.narrate != "off":
         try:
             from server.pipeline.narrate import narrate_run
-            print(f"narrated -> {narrate_run(paths.root, args.narrate, args.voice)}")
+            narrated = narrate_run(
+                paths.root,
+                args.narrate,
+                args.voice,
+                language=args.language,
+                iflytek_voice=args.iflytek_voice,
+                iflytek_speed=args.iflytek_speed,
+                iflytek_volume=args.iflytek_volume,
+                iflytek_pitch=args.iflytek_pitch,
+            )
+            print(f"narrated -> {narrated}")
         except Exception as exc:
             print(f"NARRATE ERROR (video kept, narration skipped): {exc}")
     print(

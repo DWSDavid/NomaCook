@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from perception.realtime_recognition import (
     DishConfirmationGate,
+    SpeechAnnouncer,
     StableRecognizer,
     catalog_for_profile,
     class_for_prompt,
@@ -99,3 +102,58 @@ def test_dish_gate_accepts_one_very_high_confidence_result() -> None:
 
     assert event is not None
     assert event.zh == "蛋炒饭"
+
+
+def test_speech_announcer_keeps_only_latest_pending_message() -> None:
+    heard: list[str] = []
+    first_started = threading.Event()
+    release_first = threading.Event()
+    latest_finished = threading.Event()
+
+    def speaker(text: str) -> None:
+        heard.append(text)
+        if text == "first":
+            first_started.set()
+            assert release_first.wait(1.0)
+        if text == "latest":
+            latest_finished.set()
+
+    announcer = SpeechAnnouncer(speaker=speaker)
+    try:
+        assert announcer.speak("first")
+        assert first_started.wait(1.0)
+        assert announcer.speak("stale")
+        assert announcer.speak("latest")
+
+        release_first.set()
+        assert latest_finished.wait(1.0)
+        assert heard == ["first", "latest"]
+    finally:
+        release_first.set()
+        announcer.close()
+
+
+def test_speech_announcer_close_drops_pending_and_rejects_new_messages() -> None:
+    heard: list[str] = []
+    first_started = threading.Event()
+    release_first = threading.Event()
+    first_finished = threading.Event()
+
+    def speaker(text: str) -> None:
+        heard.append(text)
+        first_started.set()
+        assert release_first.wait(1.0)
+        first_finished.set()
+
+    announcer = SpeechAnnouncer(speaker=speaker)
+    assert announcer.speak("first")
+    assert first_started.wait(1.0)
+    assert announcer.speak("pending")
+
+    announcer.close(timeout=0.01)
+    assert not announcer.speak("after close")
+    release_first.set()
+    assert first_finished.wait(1.0)
+    announcer.close()
+
+    assert heard == ["first"]

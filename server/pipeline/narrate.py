@@ -214,7 +214,44 @@ def _duration_ms(clip: Path) -> float:
     return float(out.stdout.strip()) * 1000.0
 
 
-def narrate_run(run_root: Path, backend: str, voice: str = "Tingting") -> Path:
+def _read_clip_meta(path: Path) -> dict | None:
+    if not path.is_file():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _playable_clip(path: Path, *, minimum_bytes: int) -> bool:
+    if not path.exists() or path.stat().st_size <= minimum_bytes:
+        return False
+    try:
+        return _duration_ms(path) > 0
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+
+
+def narrate_run(
+    run_root: Path,
+    backend: str,
+    voice: str = "Tingting",
+    *,
+    language: str = "zh-CN",
+    iflytek_voice: str | None = None,
+    iflytek_speed: int = 50,
+    iflytek_volume: int = 50,
+    iflytek_pitch: int = 50,
+) -> Path:
+    if backend == "iflytek":
+        for name, value in (
+            ("iflytek_speed", iflytek_speed),
+            ("iflytek_volume", iflytek_volume),
+            ("iflytek_pitch", iflytek_pitch),
+        ):
+            if not 0 <= value <= 100:
+                raise ValueError(f"{name} must be between 0 and 100")
     _require_ffmpeg()
     items = json.loads((run_root / "narration.json").read_text(encoding="utf-8"))
     if not items:
@@ -222,33 +259,106 @@ def narrate_run(run_root: Path, backend: str, voice: str = "Tingting") -> Path:
     clips_dir = run_root / "narration_clips"
     clips_dir.mkdir(exist_ok=True)
 
+    if backend == "say":
+        backend_voice = voice
+        clip_suffix = ".aiff"
+        output_language = "zh-CN"
+        style_version = "say-v1"
+    elif backend == "gemini":
+        backend_voice = str(gemini_setting("GEMINI_TTS_VOICE", "Aoede"))
+        clip_suffix = ".wav"
+        output_language = "zh-CN"
+        style_version = TTS_STYLE_PREFIX
+    elif backend == "iflytek":
+        from server.iflytek_config import (
+            iflytek_credentials,
+            iflytek_tts_voice,
+            normalize_language,
+        )
+        from server.voice.iflytek_translate import (
+            IFlytekTranslator,
+            translation_language_code,
+        )
+        from server.voice.iflytek_tts import IFlytekTTSProvider
+
+        output_language = normalize_language(language)
+        backend_voice = iflytek_tts_voice(output_language, iflytek_voice)
+        credentials = iflytek_credentials()
+        assert credentials is not None
+        iflytek_provider = IFlytekTTSProvider(credentials)
+        translation_target = translation_language_code(output_language)
+        iflytek_translator = (
+            IFlytekTranslator() if translation_target != "cn" else None
+        )
+        clip_suffix = ".wav"
+        style_version = "iflytek-online-tts-pcm16k-v1"
+    else:
+        raise ValueError(f"unknown narrate backend {backend!r}")
+
     clips: list[Path] = []
+    spoken_texts: list[str] = []
     for i, item in enumerate(items):
         transcript = clips_dir / f"clip_{i:03d}.txt"
-        transcript_matches = (
-            transcript.exists()
-            and transcript.read_text(encoding="utf-8") == item["text"]
+        meta_path = clips_dir / f"clip_{i:03d}.meta.json"
+        clip = clips_dir / f"clip_{i:03d}{clip_suffix}"
+        cache_spec = {
+            "source_text": item["text"],
+            "backend": backend,
+            "language": output_language,
+            "voice": backend_voice,
+            "speed": iflytek_speed,
+            "volume": iflytek_volume,
+            "pitch": iflytek_pitch,
+            "style_version": style_version,
+        }
+        cached = _read_clip_meta(meta_path)
+        cache_matches = bool(
+            cached
+            and all(cached.get(key) == value for key, value in cache_spec.items())
+            and isinstance(cached.get("spoken_text"), str)
         )
+        spoken_text = str(cached["spoken_text"]) if cache_matches else item["text"]
+        if backend == "iflytek" and not cache_matches and iflytek_translator:
+            spoken_text = iflytek_translator.translate(
+                item["text"], source="cn", target=translation_target
+            )
+
         if backend == "say":
-            clip = clips_dir / f"clip_{i:03d}.aiff"
-            if not (
-                transcript_matches and clip.exists() and clip.stat().st_size > 0
-            ):
-                synthesize_say(item["text"], clip, voice=voice)
+            playable = _playable_clip(clip, minimum_bytes=0)
+            if not (cache_matches and playable):
+                synthesize_say(spoken_text, clip, voice=voice)
         elif backend == "gemini":
-            clip = clips_dir / f"clip_{i:03d}.wav"
-            playable = False
-            if transcript_matches and clip.exists() and clip.stat().st_size > 44:
-                try:
-                    playable = _duration_ms(clip) > 0
-                except (OSError, ValueError, subprocess.SubprocessError):
-                    playable = False
-            if not playable:
-                synthesize_gemini(item["text"], clip)
-        else:
-            raise ValueError(f"unknown narrate backend {backend!r}")
-        transcript.write_text(item["text"], encoding="utf-8")
+            playable = _playable_clip(clip, minimum_bytes=44)
+            if not (cache_matches and playable):
+                synthesize_gemini(spoken_text, clip)
+        elif backend == "iflytek":
+            from server.voice.tts import SpeechRequest, write_wav_sync
+
+            playable = _playable_clip(clip, minimum_bytes=44)
+            if not (cache_matches and playable):
+                write_wav_sync(
+                    iflytek_provider,
+                    SpeechRequest(
+                        text=spoken_text,
+                        language=output_language,
+                        voice=backend_voice,
+                        speed=iflytek_speed,
+                        volume=iflytek_volume,
+                        pitch=iflytek_pitch,
+                    ),
+                    clip,
+                )
+        transcript.write_text(spoken_text, encoding="utf-8")
+        meta_path.write_text(
+            json.dumps(
+                {**cache_spec, "spoken_text": spoken_text},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         clips.append(clip)
+        spoken_texts.append(spoken_text)
 
     durations = [_duration_ms(c) for c in clips]
     video_duration = _duration_ms(run_root / "annotated.mp4")
@@ -257,6 +367,12 @@ def narrate_run(run_root: Path, backend: str, voice: str = "Tingting") -> Path:
     schedule_rows = [
         {
             **item,
+            "spoken_text": spoken_texts[i],
+            "language": output_language,
+            "voice": backend_voice,
+            "speed": iflytek_speed,
+            "volume": iflytek_volume,
+            "pitch": iflytek_pitch,
             "duration_ms": round(durations[i], 1),
             "selected": i in selected_starts,
             "actual_start_ms": (

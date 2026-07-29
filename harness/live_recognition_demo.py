@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NomaCook real-time dish/kitchen-item recognition + Chinese speech demo."""
+"""NomaCook real-time recognition with local or iFLYTEK streaming speech."""
 
 from __future__ import annotations
 
@@ -49,6 +49,12 @@ def _device(name: str) -> str:
 
 
 def _source(value: str) -> int | str:
+    return int(value) if value.isdigit() else value
+
+
+def _audio_device(value: str | None) -> int | str | None:
+    if value is None or not value.strip():
+        return None
     return int(value) if value.isdigit() else value
 
 
@@ -177,6 +183,51 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cooldown", type=float, default=8.0, help="同物重新播报冷却秒数")
     parser.add_argument("--voice", default="Tingting", help="macOS say 中文音色")
     parser.add_argument(
+        "--speech-backend",
+        choices=("say", "iflytek"),
+        default="say",
+        help="实时播报后端",
+    )
+    parser.add_argument(
+        "--language",
+        default="zh-CN",
+        help="讯飞播报目标语言，如 zh-CN、en-US、ja-JP",
+    )
+    parser.add_argument(
+        "--iflytek-voice",
+        default=None,
+        help="讯飞控制台已授权的发音人 vcn；默认读取对应语言环境变量",
+    )
+    parser.add_argument(
+        "--iflytek-speed",
+        type=int,
+        choices=range(101),
+        default=50,
+        metavar="0-100",
+        help="讯飞语速（默认 50）",
+    )
+    parser.add_argument(
+        "--iflytek-volume",
+        type=int,
+        choices=range(101),
+        default=50,
+        metavar="0-100",
+        help="讯飞音量（默认 50）",
+    )
+    parser.add_argument(
+        "--iflytek-pitch",
+        type=int,
+        choices=range(101),
+        default=50,
+        metavar="0-100",
+        help="讯飞音高（默认 50）",
+    )
+    parser.add_argument(
+        "--output-device",
+        default=None,
+        help="讯飞 PCM 播放设备编号或名称；默认使用系统输出设备",
+    )
+    parser.add_argument(
         "--dish-vlm",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -219,6 +270,61 @@ def run(args: argparse.Namespace) -> int:
     if wants_dishes and not dish_vlm:
         print("提示：未开启 Gemini 菜品识别；本地厨房用品识别仍正常运行。")
 
+    if args.speech_backend == "iflytek" and not args.no_speech:
+        from server.iflytek_config import (
+            iflytek_credentials,
+            iflytek_tts_voice,
+            normalize_language,
+        )
+        from server.voice.iflytek_translate import (
+            IFlytekTranslator,
+            translation_language_code,
+        )
+        from server.voice.iflytek_tts import IFlytekTTSProvider
+        from server.voice.playback import play_stream_sync
+        from server.voice.tts import SpeechRequest
+
+        language = normalize_language(args.language)
+        voice = iflytek_tts_voice(language, args.iflytek_voice)
+        credentials = iflytek_credentials()
+        assert credentials is not None
+        provider = IFlytekTTSProvider(credentials)
+        target = translation_language_code(language)
+        translator = IFlytekTranslator() if target != "cn" else None
+        output_device = _audio_device(args.output_device)
+
+        def speak_with_iflytek(text: str) -> None:
+            spoken = (
+                translator.translate(text, source="cn", target=target)
+                if translator is not None
+                else text
+            )
+            play_stream_sync(
+                provider,
+                SpeechRequest(
+                    text=spoken,
+                    language=language,
+                    voice=voice,
+                    speed=args.iflytek_speed,
+                    volume=args.iflytek_volume,
+                    pitch=args.iflytek_pitch,
+                ),
+                output_device=output_device,
+            )
+
+        speaker = SpeechAnnouncer(
+            enabled=True, voice=voice, speaker=speak_with_iflytek
+        )
+        print(
+            f"语音：讯飞流式 TTS，{language=}，{voice=}，"
+            f"speed={args.iflytek_speed}，volume={args.iflytek_volume}，"
+            f"pitch={args.iflytek_pitch}"
+        )
+    else:
+        speaker = SpeechAnnouncer(enabled=not args.no_speech, voice=args.voice)
+    if not args.no_speech and not speaker.available:
+        print("当前语音后端不可用，已自动降级为屏幕/终端提示。")
+
     detector = ObjectDetector(vocab=vocab, device=device, conf=args.conf)
     recognizer = StableRecognizer(
         window=args.window,
@@ -228,9 +334,6 @@ def run(args: argparse.Namespace) -> int:
         cooldown_seconds=args.cooldown,
     )
     dish_gate = DishConfirmationGate(min_confidence=args.dish_conf)
-    speaker = SpeechAnnouncer(enabled=not args.no_speech, voice=args.voice)
-    if not args.no_speech and not speaker.available:
-        print("当前系统没有 macOS say，已自动降级为屏幕/终端提示。")
 
     cap = _open_capture(source)
     if not cap.isOpened():
