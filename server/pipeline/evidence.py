@@ -44,6 +44,8 @@ def _base(
     source: str,
     payload: Any,
     confidence: float | None,
+    context_version: int | None = None,
+    runtime_mode: str = "RUN",
 ) -> EventEnvelope:
     stamp = t_server_for(pts_ms)
     return create_event(
@@ -58,6 +60,8 @@ def _base(
         payload=payload,
         event_id=event_id_for(session_id, seq),
         confidence=confidence,
+        context_version=context_version,
+        runtime_mode=runtime_mode,
     )
 
 

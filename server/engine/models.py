@@ -35,7 +35,9 @@ class StepProgress(BaseModel):
     score: float = Field(default=0.0, ge=0.0, le=1.0)
     consecutive_hits: int = Field(default=0, ge=0)
     matched_rule_ids: tuple[str, ...] = ()
+    matched_source_groups: tuple[str, ...] = ()
     evidence_refs: tuple[EvidenceReference, ...] = ()
+    window_started_at: datetime | None = None
     uncertain_since: datetime | None = None
 
 

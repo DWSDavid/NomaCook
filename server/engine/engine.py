@@ -16,7 +16,7 @@ from .models import (
     StepProgress,
     StepTransition,
 )
-from .sop import EvidenceRule, RecipeSOP, RecipeStep
+from .sop import CompletionPolicy, EvidenceRule, RecipeSOP, RecipeStep, RecoveryTransition
 
 
 MAX_FRAME_AGE_MS = 3_000.0
@@ -46,6 +46,9 @@ class EngineResult(BaseModel):
         "question_pending",
         "step_completed",
         "session_completed",
+        "recovered",
+        "shadow_ignored",
+        "context_mismatch",
     ]
     context: SessionContext
     transition: StepTransition | None = None
@@ -83,6 +86,20 @@ def _valid_confirmation(event: EventEnvelope, step: RecipeStep) -> bool:
     if step.high_risk and not event.payload.get("question_event_id"):
         return False
     return True
+
+
+def _completion_ready(
+    *,
+    score: float,
+    consecutive_hits: int,
+    matched_source_groups: set[str],
+    policy: CompletionPolicy,
+) -> bool:
+    return (
+        score >= policy.threshold
+        and consecutive_hits >= policy.consecutive_hits
+        and len(matched_source_groups) >= policy.min_source_groups
+    )
 
 
 class StateEngine:
@@ -135,6 +152,16 @@ class StateEngine:
             )
 
         self._seen_event_ids.add(event.event_id)
+
+        if event.runtime_mode != "RUN":
+            return EngineResult(status="shadow_ignored", context=self._context)
+
+        if (
+            event.context_version is not None
+            and event.context_version != self._context.context_version
+        ):
+            return EngineResult(status="context_mismatch", context=self._context)
+
         if self._context.step_status == "completed":
             self._context = self._context.model_copy(
                 update={
@@ -143,6 +170,21 @@ class StateEngine:
                 }
             )
             return EngineResult(status="session_completed", context=self._context)
+
+        recovery = next(
+            (
+                edge
+                for edge in self.current_step.recovery_transitions
+                if edge.event_type == event.type
+                and all(
+                    event.payload.get(key) == value
+                    for key, value in edge.payload_matches.items()
+                )
+            ),
+            None,
+        )
+        if recovery is not None:
+            return self._recover_to(event, recovery.target_step_id)
 
         frame_age_ms = max(
             0.0, (event.received_at - event.t_server_est).total_seconds() * 1000.0
@@ -170,7 +212,23 @@ class StateEngine:
             else []
         )
         progress = self._context.step_progress
+
+        window_expired = (
+            progress.window_started_at is not None
+            and (
+                event.t_server_est - progress.window_started_at
+            ).total_seconds() * 1000.0
+            > step.completion_policy.evidence_window_ms
+        )
+        if window_expired:
+            progress = StepProgress(
+                score=0.0,
+                consecutive_hits=0,
+                uncertain_since=progress.uncertain_since,
+            )
+
         matched_ids = set(progress.matched_rule_ids)
+        matched_groups = set(progress.matched_source_groups)
         refs = list(progress.evidence_refs)
         score = progress.score
 
@@ -180,6 +238,7 @@ class StateEngine:
                 matched_ids.add(rule.id)
                 weight_added = rule.weight
                 score = min(1.0, score + weight_added)
+            matched_groups.add(rule.source_group)
             refs.append(
                 EvidenceReference(
                     event_id=event.event_id,
@@ -192,7 +251,10 @@ class StateEngine:
 
         consecutive_hits = progress.consecutive_hits
         uncertain_since = progress.uncertain_since
+        window_started_at = progress.window_started_at
         if rules:
+            if window_started_at is None:
+                window_started_at = event.t_server_est
             if score >= step.completion_policy.threshold:
                 if any(rule.advances_confirmation_streak for rule in rules):
                     consecutive_hits += 1
@@ -209,14 +271,20 @@ class StateEngine:
             score=score,
             consecutive_hits=consecutive_hits,
             matched_rule_ids=tuple(sorted(matched_ids)),
+            matched_source_groups=tuple(sorted(matched_groups)),
             evidence_refs=tuple(refs),
+            window_started_at=window_started_at,
             uncertain_since=uncertain_since,
         )
 
         if (
             rules
-            and score >= step.completion_policy.threshold
-            and consecutive_hits >= step.completion_policy.consecutive_hits
+            and _completion_ready(
+                score=score,
+                consecutive_hits=consecutive_hits,
+                matched_source_groups=matched_groups,
+                policy=step.completion_policy,
+            )
         ):
             return self._complete_step(event, new_progress)
 
@@ -278,10 +346,7 @@ class StateEngine:
         self, event: EventEnvelope, progress: StepProgress
     ) -> EngineResult:
         completed_step = self.current_step
-        next_index = self._step_index + 1
-        next_step = (
-            self.recipe.steps[next_index] if next_index < len(self.recipe.steps) else None
-        )
+        next_step = self._step_after(completed_step)
         transition = StepTransition(
             decision_id=f"dec_{self._context.session_id}_{event.seq}",
             completed_step_id=completed_step.id,
@@ -313,7 +378,10 @@ class StateEngine:
                 transition=transition,
             )
 
-        self._step_index = next_index
+        for idx, s in enumerate(self.recipe.steps):
+            if s.id == next_step.id:
+                self._step_index = idx
+                break
         self._context = self._context.model_copy(
             update={
                 "current_step_id": next_step.id,
@@ -328,3 +396,37 @@ class StateEngine:
         return EngineResult(
             status="step_completed", context=self._context, transition=transition
         )
+
+    def _step_after(self, completed_step: RecipeStep) -> RecipeStep | None:
+        if completed_step.next_step_id is not None:
+            for step in self.recipe.steps:
+                if step.id == completed_step.next_step_id:
+                    return step
+        # ponytail: fallback to sequence order for legacy SOPs
+        next_index = self._step_index + 1
+        if next_index < len(self.recipe.steps):
+            return self.recipe.steps[next_index]
+        return None
+
+    def _recover_to(self, event: EventEnvelope, target_step_id: str) -> EngineResult:
+        target_index = None
+        for i, step in enumerate(self.recipe.steps):
+            if step.id == target_step_id:
+                target_index = i
+                break
+        if target_index is None:
+            return EngineResult(status="unmatched", context=self._context)
+
+        self._step_index = target_index
+        next_step = self.recipe.steps[target_index]
+        self._context = self._context.model_copy(
+            update={
+                "current_step_id": next_step.id,
+                "last_seq": event.seq,
+                "step_progress": StepProgress(),
+                "pending_question": None,
+                "active_objects": next_step.objects_involved,
+                "context_version": self._context.context_version + 1,
+            }
+        )
+        return EngineResult(status="recovered", context=self._context)
