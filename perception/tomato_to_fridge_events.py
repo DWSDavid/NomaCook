@@ -219,11 +219,13 @@ class TomatoToFridgeTracker:
         if self._origin_anchor is None and len(self._tomato_history) >= self._stability:
             recent = [item[0] for item in list(self._tomato_history)[-self._stability:]]
             if max(_distance(recent[0], point) for point in recent[1:]) <= self._stationary_radius:
-                self._origin_anchor = (
+                candidate = (
                     sum(point[0] for point in recent) / len(recent),
                     sum(point[1] for point in recent) / len(recent),
                 )
-                self._stable_table_counter = self._stability - 1
+                if self._fridge_box is None or not _point_in_box(candidate, self._fridge_box):
+                    self._origin_anchor = candidate
+                    self._stable_table_counter = self._stability - 1
         in_table_now = (
             tomato_pos is not None
             and self._origin_anchor is not None
@@ -369,11 +371,10 @@ class TomatoToFridgeTracker:
                 if _point_in_box(palm, fridge_box):
                     hand_near_fridge = True
                     break
-            if hand_near_fridge and not self._has_fired("DEST_INTERACTION"):
+            if hand_near_fridge:
                 events.append(TomatoToFridgeEvent(
                     t_ms, "DESTINATION_INTERACTION", {"region": "refrigerator"},
                 ))
-                self._mark_fired("DEST_INTERACTION")
 
         # ── OBJECT_MOVING_WITH_HAND ──
         if self._holding_active and len(self._tomato_history) >= 3:
@@ -410,7 +411,7 @@ class TomatoToFridgeTracker:
         for k in keys:
             if any(k.startswith(p) for p in (
                 "STABLE_", "LEFT_", "ENTERED_", "EXITED_",
-                "DEST_INTERACTION", "MOVED_AWAY", "OBJECT_PRESENT_",
+                "MOVED_AWAY", "OBJECT_PRESENT_",
                 "VISIBILITY_LOST",
             )):
                 self._seen_events.discard(k)

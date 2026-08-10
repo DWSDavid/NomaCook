@@ -288,6 +288,19 @@ def test_video_style_sequence_reaches_completion() -> None:
     update([tomato(620, 400), ("refrigerator", 0.10, (800, 0, 1910, 1080))])
     assert engine.context.current_step_id == "fridge_interaction"
 
+    # DESTINATION_INTERACTION x2 to advance fridge_interaction → candidate_inside_fridge
+    for _ in range(2):
+        engine.consume(create_event(
+            session_id=SESSION_ID, seq=seq,
+            event_type="DESTINATION_INTERACTION",
+            t_device_ms=tick * 100.0, t_server_est=t_server_for(tick * 100.0),
+            received_at=t_server_for(tick * 100.0),
+            source="test", event_id=event_id_for(SESSION_ID, seq),
+            confidence=0.9, payload={"region": "refrigerator"},
+        ))
+        seq += 1
+        tick += 1
+
     for _ in range(3):
         update([tomato(1300, 600), fridge])
     for _ in range(5):

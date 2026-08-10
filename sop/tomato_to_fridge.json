@@ -214,28 +214,19 @@
       "title": "靠近冰箱",
       "instruction": "番茄已经靠近冰箱了，请把它放进去。",
       "objects_involved": ["tomato", "refrigerator"],
-      "completion_check": "冰箱在画面中持续可见。",
+      "completion_check": "用户拿着番茄到达冰箱前，手靠近冰箱区域。",
       "est_duration_sec": 10,
       "check_policy": "continuous_evidence",
       "failure_modes": ["番茄未进入冰箱"],
       "completion_policy": {
         "threshold": 0.8,
-        "consecutive_hits": 1,
+        "consecutive_hits": 2,
         "question_min_score": 0.4,
         "question_after_ms": 3000,
-        "question": "番茄进入冰箱了吗？",
-        "evidence_window_ms": 3000,
+        "question": "你拿着番茄到冰箱前了吗？",
+        "evidence_window_ms": 5000,
         "min_source_groups": 1,
         "evidence_rules": [
-          {
-            "id": "fridge_visible",
-            "event_type": "DESTINATION_PRESENT",
-            "payload_matches": {"region": "refrigerator_interior"},
-            "weight": 0.8,
-            "min_confidence": 0.35,
-            "advances_confirmation_streak": true,
-            "source_group": "destination"
-          },
           {
             "id": "fridge_interaction",
             "event_type": "DESTINATION_INTERACTION",

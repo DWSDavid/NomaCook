@@ -216,3 +216,73 @@ def test_empty_inference_updates_accumulate_loss() -> None:
         ))
 
     assert any(e.event_type == "VISIBILITY_LOST" for e in all_events)
+
+
+# ── DESTINATION_INTERACTION hardening ──
+
+
+def test_destination_interaction_fires_per_inference_frame() -> None:
+    """Each inference frame where holding + hand-near-fridge fires an event.
+    No dedup — engine needs consecutive_hits accumulation."""
+    tracker = TomatoToFridgeTracker(
+        frame_width=640, frame_height=480, stability_frames=2,
+    )
+    det = ("tomato", 0.9, (200, 370, 260, 430))
+    fridge = ("refrigerator", 0.6, (100, 100, 300, 250))
+    palm = (200.0, 200.0)
+
+    # establish tomato + fridge
+    for _ in range(3):
+        tracker.update(t_ms=100, detections=[det, fridge], hands=[],
+                       interaction_events=[])
+    # holding + hand near fridge
+    all_events: list = []
+    for _ in range(3):
+        all_events.extend(tracker.update(
+            t_ms=200, detections=[det, fridge],
+            hands=[("Right", palm, (180, 180, 220, 220), True)],
+            interaction_events=[("hand_holding_object", "Right", "tomato")],
+        ))
+
+    dest_events = [e for e in all_events if e.event_type == "DESTINATION_INTERACTION"]
+    assert len(dest_events) >= 2
+
+
+def test_single_frame_no_destination_without_holding() -> None:
+    """A single inference frame with hand near fridge but no holding
+    must NOT produce DESTINATION_INTERACTION."""
+    tracker = TomatoToFridgeTracker(
+        frame_width=640, frame_height=480, stability_frames=2,
+    )
+    det = ("tomato", 0.9, (200, 370, 260, 430))
+    fridge = ("refrigerator", 0.6, (100, 100, 300, 250))
+    palm = (200.0, 200.0)
+
+    for _ in range(3):
+        tracker.update(t_ms=100, detections=[det, fridge], hands=[],
+                       interaction_events=[])
+    all_events = tracker.update(
+        t_ms=200, detections=[det, fridge],
+        hands=[("Right", palm, (180, 180, 220, 220), False)],
+        interaction_events=[],
+    )
+    dest_events = [e for e in all_events if e.event_type == "DESTINATION_INTERACTION"]
+    assert len(dest_events) == 0
+
+
+def test_origin_not_set_inside_known_fridge() -> None:
+    """If fridge is detected first and tomato is inside it,
+    _origin_anchor must NOT be set — preventing wrong table learning."""
+    tracker = TomatoToFridgeTracker(
+        frame_width=640, frame_height=480, stability_frames=3,
+    )
+    fridge = ("refrigerator", 0.6, (10, 10, 300, 200))
+    # tomato inside fridge box
+    det = ("tomato", 0.9, (50, 50, 90, 90))
+
+    for _ in range(4):
+        tracker.update(t_ms=100, detections=[det, fridge], hands=[],
+                       interaction_events=[])
+
+    assert tracker._origin_anchor is None
+
