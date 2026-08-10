@@ -1,15 +1,12 @@
-"""Offline video eval: MP4 → perception → StateEngine → artifacts.
+"""Offline video eval with optional annotated rendering and ground-truth comparison.
 
-Produces (always, even if empty):
-  events.jsonl       — evidence events via EventLog
-  snapshots.jsonl    — TaskSnapshot after every event
-  observations.jsonl — per-inference-frame perception details
-  latency.csv        — per-frame timing
-  summary.json       — aggregate stats
+Artifacts always produced:
+  events.jsonl, snapshots.jsonl, observations.jsonl, latency.csv, summary.json
 
-Usage:
-    .venv/bin/python -m harness.eval_tomato_to_fridge \
-        --source data/test_videos/demo.mp4 --run-dir data/evals/run_01
+With --render-video: annotated.mp4
+With --annotations <yaml>: comparison.jsonl + AI-vs-Expected overlay
+
+Annotations are NEVER fed to StateEngine — overlay only.
 """
 
 from __future__ import annotations
@@ -22,6 +19,9 @@ import sys
 import time
 from pathlib import Path
 
+import cv2
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from perception.detector import ObjectDetector
@@ -31,22 +31,28 @@ from perception.tomato_to_fridge_events import (
     TomatoToFridgeTracker,
     canonicalize_detections,
 )
+from server.domain.annotations import AnnotationTimeline, load_annotations
 from server.domain.config import DomainConfig
 from server.engine import StateEngine, load_recipe
 from server.engine.snapshot import build_task_snapshot
 from server.events import create_event
 from server.events.log import EventLog
 from server.live.frame_source import open_source
+from server.pipeline.render import (
+    AnnotatedVideoWriter,
+    HAND_COLOR,
+    HAND_EDGES,
+)
 from server.pipeline.session import (
     SESSION_EPOCH,
     SessionPaths,
-    create_run_dir,
     event_id_for,
     t_server_for,
 )
 
 SESSION_ID = "ses_tomato_fridge_eval"
 DOMAIN_PACK = Path(__file__).resolve().parent.parent / "domain_packs" / "kitchen" / "tomato_to_fridge.yaml"
+_FONT = cv2.FONT_HERSHEY_SIMPLEX
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -58,6 +64,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--conf", type=float, default=None)
     ap.add_argument("--table-fraction", type=float, default=None)
     ap.add_argument("--stability", type=int, default=None)
+    ap.add_argument("--annotations", default=None, help="annotation YAML for comparison")
+    ap.add_argument("--render-video", action="store_true",
+                    help="output annotated.mp4 with AI vs Expected overlay")
     ap.add_argument("--max-frames", type=int, default=0)
     return ap
 
@@ -66,19 +75,93 @@ def _to_xyxy(box) -> tuple[int, int, int, int]:
     return (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
 
 
+def _draw_annotation_overlay(frame, *, pts_ms, engine, annotations, detections, hands,
+                              yolo_ms, recent_events):
+    h, w = frame.shape[:2]
+
+    # ── detection boxes ──
+    for label, conf, box in detections:
+        cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 255), 1)
+        cv2.putText(frame, f"{label} {conf:.2f}", (box[0], box[1] - 4),
+                    _FONT, 0.4, (0, 255, 255), 1)
+
+    # ── hand skeletons ──
+    for hand in hands:
+        pts = hand.landmarks_px.astype(int)
+        for a, b in HAND_EDGES:
+            cv2.line(frame, tuple(pts[a]), tuple(pts[b]), HAND_COLOR, 1)
+        for p in pts:
+            cv2.circle(frame, tuple(p), 2, HAND_COLOR, -1)
+
+    # ── status bar ──
+    step = engine.current_step
+    ctx = engine.context
+    progress = ctx.step_progress
+    score_pct = min(progress.score / max(step.completion_policy.threshold, 1e-6), 1.0)
+    cv2.rectangle(frame, (0, 0), (w, 72), (32, 32, 32), -1)
+
+    lines = [
+        f"Step {step.sequence}/{len(engine.recipe.steps)}: {step.id}  "
+        f"Score: {progress.score:.2f}/{step.completion_policy.threshold:.1f}  "
+        f"Hits: {progress.consecutive_hits}/{step.completion_policy.consecutive_hits}",
+        f"YOLO: {yolo_ms:.0f}ms  |  det={len(detections)}  hands={len(hands)}",
+    ]
+    for i, line in enumerate(lines):
+        cv2.putText(frame, line, (8, 18 + i * 18), _FONT, 0.45, (255, 255, 255), 1)
+
+    bar_w = int((w - 16) * score_pct)
+    cv2.rectangle(frame, (8, 58), (8 + bar_w, 64), (0, 220, 0), -1)
+    cv2.rectangle(frame, (8, 58), (w - 8, 64), (90, 90, 90), 1)
+
+    # ── AI vs Expected ──
+    ann = annotations.lookup(pts_ms) if annotations else None
+    predicted_id = engine.context.current_step_id
+    expected_id = ann.expected_step_id if ann else "UNLABELED"
+
+    if ann is None:
+        comparison = "UNLABELED"
+        cmp_color = (160, 160, 160)
+    elif predicted_id == expected_id:
+        comparison = "MATCH"
+        cmp_color = (0, 220, 0)
+    else:
+        comparison = "MISMATCH"
+        cmp_color = (0, 0, 255)
+
+    cv2.putText(frame, f"AI Predicted: {predicted_id}", (8, h - 48),
+                _FONT, 0.5, (0, 255, 255), 1)
+    cv2.putText(frame, f"Expected: {expected_id}", (8, h - 24),
+                _FONT, 0.5, (200, 200, 200), 1)
+    cv2.putText(frame, comparison, (w - 120, h - 36),
+                _FONT, 0.55, cmp_color, 2)
+
+    # ── time ──
+    cv2.putText(frame, f"{pts_ms / 1000.0:.2f}s", (w - 90, 18),
+                _FONT, 0.45, (200, 200, 200), 1)
+
+    # ── recent events ──
+    for i, ev in enumerate(recent_events[-3:]):
+        cv2.putText(frame, ev[:60], (8, h - 70 - i * 16),
+                    _FONT, 0.35, (160, 200, 255), 1)
+
+    return {
+        "predicted_step_id": predicted_id,
+        "expected_step_id": expected_id,
+        "comparison": comparison.lower(),
+    }
+
+
 def run(args: argparse.Namespace) -> None:
     cfg = DomainConfig.load(DOMAIN_PACK)
     recipe = load_recipe("sop/tomato_to_fridge.json")
 
-    # ── output directory ──
     run_dir = Path(args.run_dir)
-    run_id = run_dir.name
-    base = run_dir.parent
-    sid = f"ses_tomato_fridge"
     paths = SessionPaths(root=run_dir)
     paths.root.mkdir(parents=True, exist_ok=True)
     (paths.root / "keyframes").mkdir(exist_ok=True)
-    if paths.events.exists() and paths.events.stat().st_size > 0:
+
+    existing_events = paths.root / "events.jsonl"
+    if existing_events.exists() and existing_events.stat().st_size > 0:
         raise FileExistsError(f"events.jsonl already exists in {run_dir} — refusing to overwrite")
 
     device = args.device or cfg.detector_device
@@ -87,12 +170,20 @@ def run(args: argparse.Namespace) -> None:
     table_frac = args.table_fraction if args.table_fraction is not None else cfg.table_fraction
     stability = args.stability or cfg.stability_frames
 
+    # ── annotations ──
+    ann_timeline: AnnotationTimeline | None = None
+    if args.annotations:
+        valid_ids = {s.id for s in recipe.steps}
+        ann_timeline = load_annotations(args.annotations, valid_step_ids=valid_ids)
+        print(f"annotations: {args.annotations} ({len(ann_timeline.segments)} segments)")
+
     engine = StateEngine(session_id=SESSION_ID, recipe=recipe, started_at=SESSION_EPOCH)
     detector = ObjectDetector(device=device, conf=conf)
     detector.set_vocab(cfg.vocab)
     hand_tracker = HandTracker()
     fusion = InteractionTracker(k_frames=3)
     source = open_source(args.source)
+    fps = getattr(source, "fps", 30.0)
     w = getattr(source, "width", 640)
     h = getattr(source, "height", 480)
 
@@ -107,14 +198,17 @@ def run(args: argparse.Namespace) -> None:
     )
     task_tracker._fridge_fallback = fridge_fallback
 
+    writer = None
+    if args.render_video:
+        writer = AnnotatedVideoWriter(paths.root / "annotated.mp4", fps, (w, h))
+
     events_log = EventLog(paths.events)
-    paths.events.touch()  # ensure exists even with 0 events
+    (paths.root / "events.jsonl").touch()
     obs_path = paths.root / "observations.jsonl"
     snap_path = paths.root / "snapshots.jsonl"
     latency_path = paths.root / "latency.csv"
-
-    # Ensure empty artifacts exist
-    for p in (obs_path, snap_path, latency_path):
+    comp_path = paths.root / "comparison.jsonl"
+    for p in (obs_path, snap_path, latency_path, comp_path):
         p.touch()
 
     seq = 0
@@ -125,12 +219,17 @@ def run(args: argparse.Namespace) -> None:
     hand_latencies: list[float] = []
     state_latencies: list[float] = []
     total_latencies: list[float] = []
+    labeled_frames = 0
+    matched_frames = 0
+    mismatched_frames = 0
+    predicted_transitions: list[dict] = []
+    last_step_id: str | None = None
 
     with latency_path.open("w", newline="") as lf:
         lw = csv.writer(lf)
         lw.writerow(["frame_idx", "inference_ran", "yolo_ms", "hand_ms", "state_update_ms", "total_ms"])
 
-    def emit(envelope) -> None:
+    def emit(envelope):
         nonlocal total_events
         t0 = time.monotonic()
         engine.consume(envelope)
@@ -143,8 +242,10 @@ def run(args: argparse.Namespace) -> None:
             f.write(snap.model_dump_json() + "\n")
 
     print(f"source={args.source}  device={device}  detect_every={detect_every}")
-    print(f"run_dir={run_dir}")
+    print(f"run_dir={run_dir}  render={'on' if writer else 'off'}")
     print(f"Recipe: {recipe.dish} ({len(recipe.steps)} steps)")
+
+    yolo_ms_last = 0.0
 
     try:
         for pts_ms, frame in source.frames():
@@ -158,6 +259,7 @@ def run(args: argparse.Namespace) -> None:
                 raw_dets = detector.detect(frame)
                 yolo_ms = (time.monotonic() - t_yolo) * 1000.0
                 yolo_latencies.append(yolo_ms)
+                yolo_ms_last = yolo_ms
 
             t_hand = time.monotonic()
             hands = hand_tracker.detect(frame, timestamp_ms=pts_ms)
@@ -169,11 +271,10 @@ def run(args: argparse.Namespace) -> None:
                           _to_xyxy(h.box), h.is_gripping) for h in hands]
 
             can_dets = canonicalize_detections(
-                [(d.label, d.confidence, _to_xyxy(d.box)) for d in raw_dets]
+                [(d.label, d.conf, _to_xyxy(d.box)) for d in raw_dets]
             )
 
             emitted_types: list[str] = []
-            # ── always update trackers on inference frames (even with empty dets) ──
             if inference_ran:
                 fusion_events = fusion.update(
                     t=pts_ms / 1000.0, frame=frame_idx,
@@ -183,7 +284,6 @@ def run(args: argparse.Namespace) -> None:
                     detections=[(d[0], d[1], d[2]) for d in can_dets],
                 )
                 ie_names = [(ev.event, ev.hand, ev.object) for ev in fusion_events]
-
                 task_events = task_tracker.update(
                     t_ms=pts_ms, detections=can_dets, hands=hand_data,
                     interaction_events=ie_names,
@@ -201,20 +301,25 @@ def run(args: argparse.Namespace) -> None:
                     seq += 1
                     emitted_types.append(tev.event_type)
 
-            # ── observations.jsonl ──
+            # ── track predicted transitions ──
+            cur_step = engine.context.current_step_id
+            if cur_step != last_step_id:
+                predicted_transitions.append({
+                    "step_id": cur_step, "first_frame": frame_idx, "pts_ms": round(pts_ms, 2),
+                })
+                last_step_id = cur_step
+
+            # ── observations ──
             obs_row = {
-                "frame_idx": frame_idx,
-                "pts_ms": round(pts_ms, 2),
+                "frame_idx": frame_idx, "pts_ms": round(pts_ms, 2),
                 "inference_ran": inference_ran,
-                "current_step_id": engine.current_step.id,
+                "current_step_id": cur_step,
                 "raw_detections": [
-                    {"label": d.label, "conf": round(d.confidence, 3),
-                     "box": _to_xyxy(d.box)}
+                    {"label": d.label, "conf": round(d.conf, 3), "box": _to_xyxy(d.box)}
                     for d in raw_dets
                 ],
                 "canonical_detections": [
-                    {"label": d[0], "conf": round(d[1], 3), "box": d[2]}
-                    for d in can_dets
+                    {"label": d[0], "conf": round(d[1], 3), "box": d[2]} for d in can_dets
                 ],
                 "hand_count": len(hands),
                 "hands_gripping": sum(1 for h in hands if h.is_gripping),
@@ -225,25 +330,63 @@ def run(args: argparse.Namespace) -> None:
 
             total_ms = (time.monotonic() - t0) * 1000.0
             total_latencies.append(total_ms)
-
             with latency_path.open("a", newline="") as lf:
                 lw = csv.writer(lf)
-                lw.writerow([frame_idx, int(inference_ran),
-                             round(yolo_ms, 2), round(hand_ms, 2),
+                lw.writerow([frame_idx, int(inference_ran), round(yolo_ms, 2),
+                             round(hand_ms, 2),
                              round(state_latencies[-1], 2) if state_latencies else 0,
                              round(total_ms, 2)])
+
+            # ── comparison ──
+            cmp = None
+            if ann_timeline is not None:
+                cmp = _draw_annotation_overlay(
+                    frame, pts_ms=pts_ms, engine=engine,
+                    annotations=ann_timeline,
+                    detections=can_dets if inference_ran else [],
+                    hands=hands, yolo_ms=yolo_ms_last,
+                    recent_events=[],
+                )
+                with comp_path.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps({
+                        "frame_idx": frame_idx, "pts_ms": round(pts_ms, 2),
+                        "predicted_step_id": cmp["predicted_step_id"],
+                        "expected_step_id": cmp["expected_step_id"],
+                        "comparison": cmp["comparison"],
+                    }, ensure_ascii=False) + "\n")
+                ann = ann_timeline.lookup(pts_ms)
+                if ann is not None:
+                    labeled_frames += 1
+                    if cmp["predicted_step_id"] == cmp["expected_step_id"]:
+                        matched_frames += 1
+                    else:
+                        mismatched_frames += 1
+            elif writer is not None:
+                # render-video without annotations: just draw AI state
+                cmp = _draw_annotation_overlay(
+                    frame, pts_ms=pts_ms, engine=engine,
+                    annotations=None,
+                    detections=can_dets if inference_ran else [],
+                    hands=hands, yolo_ms=yolo_ms_last,
+                    recent_events=[],
+                )
+
+            if writer is not None:
+                writer.write(frame)
 
             frame_idx += 1
             if frame_idx % 100 == 0:
                 print(f"  frame {frame_idx}  events={total_events}  "
-                      f"step={engine.context.current_step_id}  "
-                      f"score={engine.context.step_progress.score:.2f}")
+                      f"step={cur_step}  score={engine.context.step_progress.score:.2f}")
             if args.max_frames and frame_idx >= args.max_frames:
                 break
 
     finally:
         source.close()
         hand_tracker.close()
+        if writer is not None:
+            writer.close()
+            print(f"annotated.mp4: {writer.frames_written} frames")
 
     def _pctl(values, pct):
         if not values:
@@ -261,13 +404,12 @@ def run(args: argparse.Namespace) -> None:
         "source": args.source,
         "task_id": cfg.task_id,
         "perception": {
-            "detector_device": device,
-            "detector_conf": conf,
-            "detect_every": detect_every,
-            "table_fraction": table_frac,
-            "stability_frames": stability,
-            "fridge_fallback": list(fridge_fallback),
+            "detector_device": device, "detector_conf": conf,
+            "detect_every": detect_every, "table_fraction": table_frac,
+            "stability_frames": stability, "fridge_fallback": list(fridge_fallback),
         },
+        "annotated_video": str(paths.root / "annotated.mp4") if writer else None,
+        "annotations_path": args.annotations,
         "total_frames": frame_idx,
         "inference_count": len(yolo_latencies),
         "total_events": total_events,
@@ -282,18 +424,24 @@ def run(args: argparse.Namespace) -> None:
         "latency_state_p95_ms": round(_pctl(state_latencies, 95), 2),
         "latency_total_mean_ms": round(sum(total_latencies) / len(total_latencies), 2) if total_latencies else 0,
         "latency_total_p95_ms": round(_pctl(total_latencies, 95), 2),
+        "labeled_frames": labeled_frames,
+        "matched_frames": matched_frames,
+        "mismatched_frames": mismatched_frames,
+        "frame_match_rate": round(matched_frames / labeled_frames, 4) if labeled_frames else None,
+        "predicted_transitions": predicted_transitions,
     }
     with (paths.root / "summary.json").open("w") as f:
         json.dump(summary, f, indent=2)
 
     print(f"\ndone. frames={frame_idx}  events={total_events}")
-    print(f"  final step: {ctx.current_step_id}  status: {ctx.step_status}")
-    print(f"  score: {ctx.step_progress.score:.2f}")
+    print(f"  final step: {ctx.current_step_id}  score: {ctx.step_progress.score:.2f}")
+    if labeled_frames:
+        print(f"  labeled: {labeled_frames}  match: {matched_frames}  "
+              f"mismatch: {mismatched_frames}  rate: {summary['frame_match_rate']}")
+    print(f"  transitions: {[t['step_id'] for t in predicted_transitions]}")
     if yolo_latencies:
-        print(f"  yolo: n={len(yolo_latencies)}  mean={summary['latency_yolo_mean_ms']}ms  "
+        print(f"  yolo: mean={summary['latency_yolo_mean_ms']}ms  "
               f"p95={summary['latency_yolo_p95_ms']}ms")
-    print(f"  total mean: {summary['latency_total_mean_ms']}ms  "
-          f"p95: {summary['latency_total_p95_ms']}ms")
 
 
 if __name__ == "__main__":

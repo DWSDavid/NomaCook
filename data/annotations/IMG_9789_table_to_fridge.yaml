@@ -1,0 +1,29 @@
+schema_version: 1
+video: data/test_videos/IMG_9789_table_to_fridge.MOV
+task_id: tomato_to_fridge_v1
+
+segments:
+  - start_s: 0.0
+    end_s: 2.0
+    expected_step_id: tomato_on_table
+    label_zh: 番茄在桌上
+
+  - start_s: 3.0
+    end_s: 5.0
+    expected_step_id: tomato_held
+    label_zh: 拿到番茄
+
+  - start_s: 5.0
+    end_s: 13.0
+    expected_step_id: tomato_in_transit
+    label_zh: 运送番茄到冰箱前
+
+  - start_s: 13.0
+    end_s: 16.0
+    expected_step_id: fridge_interaction
+    label_zh: 打开冰箱
+
+  - start_s: 22.0
+    end_s: 24.0
+    expected_step_id: candidate_inside_fridge
+    label_zh: 番茄放入冰箱
