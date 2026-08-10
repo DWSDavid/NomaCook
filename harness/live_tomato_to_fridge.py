@@ -17,7 +17,9 @@ No training, no VLM, no voice — just CV geometry signals feeding the engine.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import cv2
@@ -32,6 +34,7 @@ from perception.tomato_to_fridge_events import (
     canonicalize_detections,
 )
 from server.engine import StateEngine, load_recipe
+from server.engine.snapshot import build_task_snapshot
 from server.events import create_event
 from server.live.frame_source import open_source
 from server.pipeline.session import SESSION_EPOCH, event_id_for, t_server_for
@@ -68,6 +71,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="frames for stable-in-region confirmation")
     ap.add_argument("--allow-manual-confirm", action="store_true",
                     help="enable space/d key to force-advance a step")
+    ap.add_argument("--save-session", action="store_true",
+                    help="write events.jsonl + snapshots.jsonl to data/sessions/")
     ap.add_argument("--fridge-roi", type=_parse_roi, default=None,
                     help="fridge interior: x1,y1,x2,y2 (overrides auto-detection)")
     ap.add_argument("--no-display", action="store_true")
@@ -165,6 +170,17 @@ def run(args: argparse.Namespace) -> None:
     recent_events: list[str] = []
     manual_mode = args.allow_manual_confirm
 
+    session_dir = None
+    events_path = None
+    snapshots_path = None
+    if args.save_session:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        session_dir = Path("data/sessions") / f"tomato_fridge_live_{ts}"
+        session_dir.mkdir(parents=True, exist_ok=True)
+        events_path = session_dir / "events.jsonl"
+        snapshots_path = session_dir / "snapshots.jsonl"
+        print(f"session_dir={session_dir}")
+
     def emit(envelope) -> None:
         nonlocal seq
         result = engine.consume(envelope)
@@ -179,6 +195,13 @@ def run(args: argparse.Namespace) -> None:
                 f"#{envelope.seq} {envelope.type}: {status}"
             )
             recent_events[:] = recent_events[-20:]
+        if events_path is not None:
+            with events_path.open("a", encoding="utf-8") as f:
+                f.write(envelope.model_dump_json() + "\n")
+        if snapshots_path is not None:
+            snap = build_task_snapshot(engine.context, engine.current_step)
+            with snapshots_path.open("a", encoding="utf-8") as f:
+                f.write(snap.model_dump_json() + "\n")
 
     print(f"source={args.source}  device={args.device}  conf={args.conf}  "
           f"detect_every={args.detect_every}")
@@ -288,6 +311,21 @@ def run(args: argparse.Namespace) -> None:
         source.close()
         hand_tracker.close()
         cv2.destroyAllWindows()
+
+    if session_dir is not None:
+        summary = {
+            "session_id": SESSION_ID,
+            "recipe": recipe.dish,
+            "total_frames": frame_idx,
+            "total_events": seq,
+            "final_step_id": engine.context.current_step_id,
+            "step_status": engine.context.step_status,
+            "final_score": engine.context.step_progress.score,
+            "context_version": engine.context.context_version,
+        }
+        with (session_dir / "summary.json").open("w") as f:
+            json.dump(summary, f, indent=2)
+        print(f"session saved to {session_dir}")
 
     print(f"done. frames={frame_idx}, final step={engine.context.current_step_id}, "
           f"status={engine.context.step_status}")
