@@ -1,76 +1,84 @@
-"""Verify domain_packs/kitchen/tomato_to_fridge.yaml matches SOP and tracker."""
+"""Verify domain_packs/kitchen/tomato_to_fridge.yaml is a valid runtime config.
+
+Focuses on detecting runtime drift: missing steps, broken canonical maps,
+orphaned object names that can't produce detector prompts.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 import yaml
-
+from server.domain.config import DomainConfig
 from server.engine import load_recipe
 
 
 REPO = Path(__file__).resolve().parent.parent
+YAML_PATH = REPO / "domain_packs" / "kitchen" / "tomato_to_fridge.yaml"
 
 
-def test_domain_pack_is_valid_yaml() -> None:
-    path = REPO / "domain_packs" / "kitchen" / "tomato_to_fridge.yaml"
-    with path.open() as f:
-        data = yaml.safe_load(f)
-    assert data["task_id"] == "tomato_to_fridge_v1"
-    assert data["dish"] == "把番茄放进冰箱"
+def test_domain_config_loads() -> None:
+    cfg = DomainConfig.load(YAML_PATH)
+    assert cfg.task_id == "tomato_to_fridge_v1"
+    assert "tomato" in cfg.vocab
+    assert cfg.canonical_map
 
 
-def test_domain_pack_steps_match_sop() -> None:
+def test_step_objects_cover_all_sop_steps() -> None:
     recipe = load_recipe(REPO / "sop" / "tomato_to_fridge.json")
-    sop_step_ids = {step.id for step in recipe.steps}
-
-    path = REPO / "domain_packs" / "kitchen" / "tomato_to_fridge.yaml"
-    with path.open() as f:
-        data = yaml.safe_load(f)
-
-    yaml_step_ids = set(data["steps"].keys())
-    assert yaml_step_ids == sop_step_ids
+    cfg = DomainConfig.load(YAML_PATH)
+    sop_ids = {step.id for step in recipe.steps}
+    cfg_ids = set(cfg.step_objects.keys())
+    assert cfg_ids == sop_ids, f"mismatch: SOP={sop_ids - cfg_ids}, YAML={cfg_ids - sop_ids}"
 
 
-def test_domain_pack_covers_all_event_types() -> None:
-    # Collect all event_types referenced in the SOP evidence_rules
-    recipe = load_recipe(REPO / "sop" / "tomato_to_fridge.json")
-    sop_event_types: set[str] = set()
-    for step in recipe.steps:
-        for rule in step.completion_policy.evidence_rules:
-            sop_event_types.add(rule.event_type)
-        for edge in step.recovery_transitions:
-            sop_event_types.add(edge.event_type)
-
-    path = REPO / "domain_packs" / "kitchen" / "tomato_to_fridge.yaml"
-    with path.open() as f:
-        data = yaml.safe_load(f)
-
-    yaml_event_types = set(data["event_vocabulary"].keys())
-
-    missing = sop_event_types - yaml_event_types
-    assert not missing, f"event types in SOP but not documented: {missing}"
+def test_all_step_objects_have_canonical_aliases() -> None:
+    cfg = DomainConfig.load(YAML_PATH)
+    all_canonical = set(cfg.canonical_map.keys())
+    for step_id, objs in cfg.step_objects.items():
+        for obj in objs:
+            assert obj in all_canonical, (
+                f"step {step_id}: object {obj!r} not in canonical_map"
+            )
 
 
-def test_domain_pack_regions_match_config() -> None:
-    path = REPO / "domain_packs" / "kitchen" / "tomato_to_fridge.yaml"
-    with path.open() as f:
-        data = yaml.safe_load(f)
-
-    regions = data["regions"]
-    assert "table" in regions
-    assert "refrigerator_interior" in regions
-    assert regions["table"]["type"] == "frame_fraction"
-    assert regions["refrigerator_interior"]["type"] == "detected_or_fallback"
+def test_vocab_for_step_produces_non_empty_prompts() -> None:
+    cfg = DomainConfig.load(YAML_PATH)
+    for step_id in cfg.step_objects:
+        prompts = cfg.vocab_for_step(step_id)
+        assert len(prompts) > 0, f"step {step_id}: empty vocabulary"
+        assert any("tomato" in p for p in prompts), (
+            f"step {step_id}: no tomato-related prompt in {prompts}"
+        )
 
 
-def test_domain_pack_canonical_map_is_consistent() -> None:
-    path = REPO / "domain_packs" / "kitchen" / "tomato_to_fridge.yaml"
-    with path.open() as f:
-        data = yaml.safe_load(f)
+def test_canonical_map_includes_self() -> None:
+    cfg = DomainConfig.load(YAML_PATH)
+    for canon, aliases in cfg.canonical_map.items():
+        assert canon in aliases, (
+            f"canonical label {canon!r} must include itself in aliases"
+        )
 
-    canonical = data["canonical_map"]
-    # all aliases must map to known canonical labels
-    for canon, aliases in canonical.items():
+
+def test_no_overlapping_canonical_aliases() -> None:
+    cfg = DomainConfig.load(YAML_PATH)
+    seen: dict[str, str] = {}
+    for canon, aliases in cfg.canonical_map.items():
         for a in aliases:
-            assert a == canon or a != canon
+            if a in seen and seen[a] != canon:
+                raise AssertionError(
+                    f"alias {a!r} maps to both {seen[a]!r} and {canon!r}"
+                )
+            seen[a] = canon
+
+
+def test_yaml_matches_loaded_config() -> None:
+    """Verify DomainConfig.load() round-trips key values from YAML."""
+    cfg = DomainConfig.load(YAML_PATH)
+    with YAML_PATH.open() as f:
+        raw = yaml.safe_load(f)
+    p = raw["perception"]
+    assert cfg.detector_conf == p["detector_conf"]
+    assert cfg.detect_every == p["detect_every"]
+    assert cfg.stability_frames == p["stability_frames"]
+    assert cfg.table_fraction == raw["regions"]["table"]["fraction"]

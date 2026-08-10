@@ -190,3 +190,29 @@ def test_canonicalize_drops_unknown_labels() -> None:
     ]
     result = canonicalize_detections(dets)
     assert {r[0] for r in result} == {"tomato"}
+
+
+# ── Fix: empty inference updates are real negative observations ──
+
+
+def test_empty_inference_updates_accumulate_loss() -> None:
+    """After tomato was present, consecutive empty inference frames
+    must trigger VISIBILITY_LOST. Skipped (non-inference) frames must not."""
+    tracker = TomatoToFridgeTracker(
+        frame_width=640, frame_height=480, stability_frames=2,
+    )
+    det = ("tomato", 0.9, (200, 370, 260, 430))
+    all_events: list = []
+
+    # First: establish tomato presence
+    for _ in range(3):
+        all_events.extend(tracker.update(
+            t_ms=100, detections=[det], hands=[], interaction_events=[],
+        ))
+    # Then: empty inference frames (real negative observations)
+    for _ in range(4):
+        all_events.extend(tracker.update(
+            t_ms=200, detections=[], hands=[], interaction_events=[],
+        ))
+
+    assert any(e.event_type == "VISIBILITY_LOST" for e in all_events)

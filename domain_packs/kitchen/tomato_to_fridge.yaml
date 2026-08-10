@@ -1,21 +1,13 @@
 # NomaCook Domain Pack: tomato-to-fridge
 # Task: "把番茄放进冰箱" / "Put the tomato into the refrigerator"
 #
-# A domain pack is a task-specific perception configuration that maps each
-# SOP step to its detection requirements. The StateEngine consumes evidence
-# events; the CV layer (ObjectDetector + HandTracker + TomatoToFridgeTracker)
-# produces them according to this configuration.
-#
-# Zero training. All detection uses YOLO-World open-vocabulary + MediaPipe
-# hands + pure-geometry spatial relations.
-#
-# Reference SOP: sop/tomato_to_fridge.json
+# Perception-layer only. Completion criteria, evidence weights, recovery
+# transitions, and state advancement live in sop/tomato_to_fridge.json.
 
 task_id: tomato_to_fridge_v1
 dish: "把番茄放进冰箱"
 language: zh-CN
 
-# ── model config ──
 perception:
   detector: YOLO-World
   detector_weights: yolov8s-worldv2.pt
@@ -23,21 +15,19 @@ perception:
   detector_conf: 0.10
   hand_tracker: MediaPipe Hands (VIDEO mode)
   hand_model: weights/hand_landmarker.task
-  detect_every: 3       # YOLO runs every 3rd frame
-  stability_frames: 3   # consecutive frames to confirm stable-in-region
+  detect_every: 3
+  stability_frames: 3
 
-# ── vocabulary ──
-# All terms are English (YOLO-World CLIP encoder). Labels are canonicalized
-# before reaching the tracker: aliases collapse to canonical forms.
 vocab:
   primary:
-    - tomato           # canonical
-    - cherry tomato    # alias → tomato
-    - red fruit        # alias → tomato
+    - tomato
+    - cherry tomato
+    - red fruit
   scene_anchors:
-    - refrigerator     # canonical
-    - fridge           # alias → refrigerator
-    - freezer          # alias → refrigerator
+    - refrigerator
+    - fridge
+    - freezer
+  surface:
     - table
     - kitchen counter
     - desk
@@ -48,129 +38,32 @@ canonical_map:
   tomato: [tomato, cherry tomato, red fruit]
   refrigerator: [refrigerator, fridge, freezer]
 
-# ── regions ──
-# Tomato position relative to these regions drives state transitions.
 regions:
   table:
     type: frame_fraction
-    description: bottom portion of frame
-    fraction: 0.70       # pixels below 70% of frame height
-
+    fraction: 0.70
   refrigerator_interior:
     type: detected_or_fallback
-    yolo_label: refrigerator
     fallback_box:
       x1: 0
       y1: 0
-      x2: 0.30          # 30% of frame width
-      y2: 0.50           # 50% of frame height
+      x2: 0.30
+      y2: 0.50
 
-# ── step-by-step perception requirements ──
 steps:
   ready:
     objects_detect: [tomato, refrigerator]
-    regions_active: [table, refrigerator_interior]
-    completion_criteria: "tomato_visible + fridge_visible, both scored, consecutive_hits=2"
-    events_expected:
-      - OBJECT_PRESENT: {object: tomato}
-      - DESTINATION_PRESENT: {region: refrigerator_interior}
-
   tomato_on_table:
-    objects_detect: [tomato, table]
-    regions_active: [table]
-    completion_criteria: "OBJECT_STABLE_IN_REGION(tomato, table) x2"
-    events_expected:
-      - OBJECT_STABLE_IN_REGION: {object: tomato, region: table}
-
+    objects_detect: [tomato]
   hand_near_tomato:
-    objects_detect: [tomato, table]
-    regions_active: [table]
-    interactions_expected: [hand_near_object on tomato]
-    completion_criteria: "HAND_NEAR_STARTED(tomato) x2"
-    events_expected:
-      - HAND_NEAR_STARTED: {object: tomato}
-    recovery:
-      - HAND_NEAR_ENDED → tomato_on_table
-
+    objects_detect: [tomato]
   tomato_held:
-    objects_detect: [tomato, table, refrigerator]
-    regions_active: [table, refrigerator_interior]
-    interactions_expected: [holding on tomato]
-    motion_required: true
-    completion_criteria: "HOLDING_STARTED + OBJECT_MOVING_WITH_HAND, 2 source groups"
-    events_expected:
-      - HOLDING_STARTED: {object: tomato}
-      - OBJECT_MOVING_WITH_HAND: {object: tomato}
-    recovery:
-      - OBJECT_RETURNED_TO_REGION(tomato, table) → tomato_on_table
-
+    objects_detect: [tomato, refrigerator]
   tomato_in_transit:
     objects_detect: [tomato, refrigerator]
-    regions_active: [table, refrigerator_interior]
-    interactions_expected: [holding on tomato]
-    motion_required: true
-    completion_criteria: "OBJECT_LEFT_REGION(tomato, table) + OBJECT_MOVING_WITH_HAND, 2 source groups"
-    events_expected:
-      - OBJECT_LEFT_REGION: {object: tomato, region: table}
-      - OBJECT_MOVING_WITH_HAND: {object: tomato}
-    recovery:
-      - OBJECT_RETURNED_TO_REGION(tomato, table) → tomato_on_table
-
   fridge_interaction:
     objects_detect: [tomato, refrigerator]
-    regions_active: [refrigerator_interior]
-    interactions_expected: [holding on tomato, hand near refrigerator]
-    completion_criteria: "DESTINATION_INTERACTION + OBJECT_ENTERED_REGION(tomato, fridge), 2 source groups"
-    events_expected:
-      - DESTINATION_INTERACTION: {region: refrigerator}
-      - OBJECT_ENTERED_REGION: {object: tomato, region: refrigerator_interior}
-    recovery:
-      - OBJECT_MOVED_AWAY_FROM_DESTINATION → tomato_in_transit
-
   candidate_inside_fridge:
     objects_detect: [tomato, refrigerator]
-    regions_active: [refrigerator_interior]
-    interactions_expected: [release tomato]
-    completion_criteria: "OBJECT_ENTERED_REGION + HOLDING_ENDED, 2 source groups"
-    events_expected:
-      - OBJECT_ENTERED_REGION: {object: tomato, region: refrigerator_interior}
-      - HOLDING_ENDED: {object: tomato}
-    recovery:
-      - HOLDING_STARTED(tomato) → tomato_held
-
   tomato_released_inside:
     objects_detect: [tomato, refrigerator]
-    regions_active: [refrigerator_interior]
-    completion_criteria: "OBJECT_STABLE_IN_REGION(tomato, fridge) x2 (release_occluded alone cannot complete)"
-    events_expected:
-      - VISIBILITY_LOST: {object: tomato}         # weight 0.4, does NOT advance streak
-      - OBJECT_STABLE_IN_REGION: {object: tomato, region: refrigerator_interior}
-    recovery:
-      - OBJECT_EXITED_REGION(tomato, fridge) → tomato_held
-
-# ── event vocabulary ──
-# Maps tracker-internal event names to SOP evidence_rules event_type.
-event_vocabulary:
-  OBJECT_PRESENT: "YOLO detects canonical object in frame"
-  DESTINATION_PRESENT: "fridge region known (detected or fallback)"
-  OBJECT_STABLE_IN_REGION: "object center in region for stability_frames consecutive frames"
-  HAND_NEAR_STARTED: "from InteractionTracker: hand_near_object on canonical object"
-  HAND_NEAR_ENDED: "from InteractionTracker: hand_near_object_end"
-  HOLDING_STARTED: "from InteractionTracker: hand_holding_object on canonical object"
-  HOLDING_ENDED: "from InteractionTracker: hand_holding_object_end"
-  OBJECT_MOVING_WITH_HAND: "tomato displacement >= 15px over 3-frame window while held"
-  OBJECT_LEFT_REGION: "tomato was in region, now outside for transition_frames"
-  OBJECT_ENTERED_REGION: "tomato center enters region"
-  OBJECT_EXITED_REGION: "tomato leaves fridge interior"
-  OBJECT_RETURNED_TO_REGION: "tomato returns to region it previously left"
-  OBJECT_MOVED_AWAY_FROM_DESTINATION: "tomato moved away from fridge while inside"
-  DESTINATION_INTERACTION: "holding hand near fridge region"
-  VISIBILITY_LOST: "tomato not detected for stability_frames consecutive inference frames"
-
-# ── engine completion policy parameters ──
-# All steps: threshold=0.8, consecutive_hits=2, question_after_ms=3000,
-# evidence_window_ms=3000.
-# Steps requiring 2 source groups: tomato_held, tomato_in_transit,
-# fridge_interaction, candidate_inside_fridge.
-# tomato_released_inside: release_occluded(visibility) does NOT advance streak;
-# stable_inside(region_stability) must reach 2 consecutive hits.
