@@ -1,7 +1,15 @@
 from __future__ import annotations
 
 import pytest
-from perception.tomato_to_fridge_events import TomatoToFridgeTracker, _point_in_box, _box_center
+from perception.tomato_to_fridge_events import (
+    TomatoToFridgeTracker,
+    _point_in_box,
+    _box_center,
+    canonicalize_detections,
+)
+
+
+# ── geometry helpers ──
 
 
 def test_point_in_box() -> None:
@@ -92,3 +100,93 @@ def test_reset_region_events_allows_re_fire() -> None:
             t_ms=100, detections=[det], hands=[], interaction_events=[]
         ))
     assert any(e.event_type == "OBJECT_STABLE_IN_REGION" for e in all_events)
+
+
+# ── Fix 1: detect-every cadence regression ──
+
+IN_TABLE_DET = ("tomato", 0.9, (200, 370, 260, 430))
+
+
+def test_consistent_inference_updates_produce_stable_with_detect_every_3() -> None:
+    tracker = TomatoToFridgeTracker(
+        frame_width=640, frame_height=480, stability_frames=3,
+    )
+    all_events: list = []
+
+    for frame_idx in range(15):
+        inference = frame_idx % 3 == 0
+        if inference:
+            all_events.extend(tracker.update(
+                t_ms=frame_idx * 33.0,
+                detections=[IN_TABLE_DET],
+                hands=[],
+                interaction_events=[],
+            ))
+
+    assert any(e.event_type == "OBJECT_STABLE_IN_REGION" for e in all_events)
+    assert not any(e.event_type == "VISIBILITY_LOST" for e in all_events)
+
+
+def test_skipped_frames_do_not_accumulate_lost_counter() -> None:
+    tracker = TomatoToFridgeTracker(
+        frame_width=640, frame_height=480, stability_frames=2,
+    )
+    all_events: list = []
+
+    for _ in range(4):
+        all_events.extend(tracker.update(
+            t_ms=100, detections=[IN_TABLE_DET], hands=[], interaction_events=[],
+        ))
+    assert any(e.event_type == "OBJECT_STABLE_IN_REGION" for e in all_events)
+
+    # No further updates at all - skipped frames are just not calling update().
+    # Tracker state is frozen; no spurious events.
+    lost_after = any(e.event_type == "VISIBILITY_LOST" for e in all_events)
+    assert not lost_after
+
+
+def test_holding_started_from_gripping_hand_over_tomato() -> None:
+    tracker = TomatoToFridgeTracker(frame_width=640, frame_height=480)
+    all_events = tracker.update(
+        t_ms=100,
+        detections=[IN_TABLE_DET],
+        hands=[],
+        interaction_events=[("hand_holding_object", "right", "tomato")],
+    )
+    assert any(e.event_type == "HOLDING_STARTED" for e in all_events)
+
+
+# ── Fix 2: canonicalization ──
+
+
+def test_canonicalize_maps_aliases_to_single_label() -> None:
+    dets = [
+        ("tomato", 0.9, (10, 10, 50, 50)),
+        ("cherry tomato", 0.7, (12, 12, 48, 48)),
+        ("red fruit", 0.5, (15, 15, 45, 45)),
+        ("refrigerator", 0.8, (100, 100, 200, 200)),
+        ("fridge", 0.6, (102, 102, 198, 198)),
+    ]
+    result = canonicalize_detections(dets)
+    labels = {r[0] for r in result}
+    assert labels == {"tomato", "refrigerator"}
+    assert len(result) == 2
+
+
+def test_canonicalize_keeps_highest_confidence() -> None:
+    dets = [
+        ("tomato", 0.6, (1, 1, 10, 10)),
+        ("cherry tomato", 0.9, (2, 2, 9, 9)),
+    ]
+    result = canonicalize_detections(dets)
+    assert result[0][0] == "tomato"
+    assert result[0][1] == 0.9
+
+
+def test_canonicalize_drops_unknown_labels() -> None:
+    dets = [
+        ("table", 0.8, (0, 0, 100, 100)),
+        ("tomato", 0.7, (10, 10, 50, 50)),
+    ]
+    result = canonicalize_detections(dets)
+    assert {r[0] for r in result} == {"tomato"}

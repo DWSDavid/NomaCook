@@ -29,11 +29,10 @@ Events produced (mapped to SOP evidence_rules event_type):
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Sequence
-
-import numpy as np
 
 Box = tuple[int, int, int, int]
 Point = tuple[float, float]
@@ -44,6 +43,30 @@ STABILITY_FRAMES = 3
 TRANSITION_FRAMES = 2
 MIN_DISPLACEMENT_PX = 15.0
 MIN_SHARED_MOTION_FRAMES = 2
+
+# ── label canonicalization ──
+CANONICAL_LABELS: dict[str, str] = {
+    "tomato": "tomato",
+    "cherry tomato": "tomato",
+    "red fruit": "tomato",
+    "refrigerator": "refrigerator",
+    "fridge": "refrigerator",
+    "freezer": "refrigerator",
+}
+
+
+def canonicalize_detections(
+    detections: Sequence[tuple[str, float, Box]],
+) -> list[tuple[str, float, Box]]:
+    """Dedup overlapping aliases, keep highest-confidence per canonical label."""
+    best: dict[str, tuple[float, Box]] = {}
+    for label, conf, box in detections:
+        canonical = CANONICAL_LABELS.get(label)
+        if canonical is None:
+            continue
+        if canonical not in best or conf > best[canonical][0]:
+            best[canonical] = (conf, box)
+    return [(label, conf, box) for label, (conf, box) in best.items()]
 
 
 def _box_center(box: Box) -> Point:
@@ -58,7 +81,7 @@ def _point_in_box(pt: Point, box: Box) -> bool:
 
 
 def _distance(a: Point, b: Point) -> float:
-    return float(np.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2))
+    return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
 @dataclass
@@ -90,7 +113,6 @@ class TomatoToFridgeTracker:
         self._stability = stability_frames
 
         self._tomato_history: deque[tuple[Point, float]] = deque(maxlen=16)
-        self._hand_positions: deque[tuple[str, Point, bool]] = deque(maxlen=8)
 
         self._in_table: bool = False
         self._in_fridge: bool = False
@@ -103,8 +125,6 @@ class TomatoToFridgeTracker:
         self._stable_fridge_counter: int = 0
         self._shared_motion_counter: int = 0
         self._holding_active: bool = False
-        self._holding_label: str | None = None
-        self._fridge_known: bool = False
         self._fridge_announced: bool = False
         self._tomato_lost_counter: int = 0
 
@@ -137,12 +157,11 @@ class TomatoToFridgeTracker:
         # ── update fridge region ──
         fridge_det = None
         for label, conf, box in detections:
-            if label in ("refrigerator", "fridge", "freezer"):
+            if label == "refrigerator":
                 fridge_det = box
                 break
         if fridge_det is not None:
             self._fridge_box = fridge_det
-            self._fridge_known = True
             if not self._fridge_announced:
                 events.append(TomatoToFridgeEvent(
                     t_ms, "DESTINATION_PRESENT",
@@ -294,7 +313,6 @@ class TomatoToFridgeTracker:
                 ))
             elif ev_name == "hand_holding_object":
                 self._holding_active = True
-                self._holding_label = hand_label
                 events.append(TomatoToFridgeEvent(
                     t_ms, "HOLDING_STARTED", {"object": "tomato"},
                 ))
@@ -305,7 +323,6 @@ class TomatoToFridgeTracker:
                         t_ms, "HOLDING_ENDED", {"object": "tomato"},
                     ))
                 self._holding_active = False
-                self._holding_label = None
 
         # ── DESTINATION_INTERACTION ──
         if self._holding_active and tomato_pos is not None:
@@ -346,10 +363,6 @@ class TomatoToFridgeTracker:
                 self._in_fridge = False
         elif in_fridge_now:
             self._moved_away_counter = 0
-
-        # ── hand positions for future use ──
-        for handed, palm, _, grip in hands:
-            self._hand_positions.append((handed, palm, grip))
 
         return events
 
