@@ -17,10 +17,12 @@ import json
 import math
 import sys
 import time
+from functools import lru_cache
 from pathlib import Path
 
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -43,6 +45,7 @@ from server.pipeline.render import (
     HAND_COLOR,
     HAND_EDGES,
 )
+from server.pipeline.narrate import narrate_run
 from server.pipeline.session import (
     SESSION_EPOCH,
     SessionPaths,
@@ -53,6 +56,36 @@ from server.pipeline.session import (
 SESSION_ID = "ses_tomato_fridge_eval"
 DOMAIN_PACK = Path(__file__).resolve().parent.parent / "domain_packs" / "kitchen" / "tomato_to_fridge.yaml"
 _FONT = cv2.FONT_HERSHEY_SIMPLEX
+
+_STEP_LABELS = {
+    "ready": ("任务已开始", "Task started"),
+    "tomato_on_table": ("番茄在桌上", "Tomato on the table"),
+    "hand_near_tomato": ("手已靠近番茄", "Hand near the tomato"),
+    "tomato_held": ("已拿起番茄", "Tomato picked up"),
+    "tomato_in_transit": ("正在运送番茄", "Moving the tomato"),
+    "fridge_interaction": ("已到达冰箱", "At the refrigerator"),
+    "candidate_inside_fridge": ("番茄正在放入冰箱", "Tomato entering the refrigerator"),
+    "tomato_released_inside": ("番茄已在冰箱内放稳", "Tomato stable in the refrigerator"),
+}
+
+_NEXT_INSTRUCTIONS = {
+    "ready": ("请准备开始任务。", "Get ready to begin."),
+    "tomato_on_table": ("请确认番茄在桌面上。", "Confirm the tomato is on the table."),
+    "hand_near_tomato": ("请把手靠近番茄。", "Move your hand toward the tomato."),
+    "tomato_held": ("请拿起番茄。", "Pick up the tomato."),
+    "tomato_in_transit": ("请把番茄移向冰箱。", "Move the tomato toward the refrigerator."),
+    "fridge_interaction": ("请把番茄带到冰箱前并打开冰箱。", "Bring the tomato to the refrigerator and open it."),
+    "candidate_inside_fridge": ("请把番茄放进冰箱。", "Place the tomato inside the refrigerator."),
+    "tomato_released_inside": ("请松手，并让番茄稳定放好。", "Release the tomato and let it settle."),
+}
+
+_SPEECH_BY_STEP = {
+    "tomato_on_table": "番茄已定位。下一步，请拿起番茄。",
+    "tomato_held": "已经拿起番茄。下一步，请移向冰箱。",
+    "fridge_interaction": "已经到达冰箱。下一步，请打开冰箱。",
+    "candidate_inside_fridge": "冰箱已经打开。下一步，请把番茄放进去。",
+    "tomato_released_inside": "番茄已经稳定放入冰箱，任务完成。",
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -67,6 +100,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--annotations", default=None, help="annotation YAML for comparison")
     ap.add_argument("--render-video", action="store_true",
                     help="output annotated.mp4 with AI vs Expected overlay")
+    ap.add_argument("--local-narration", action="store_true",
+                    help="add local macOS Chinese narration to the rendered video")
+    ap.add_argument("--voice", default="Meijia",
+                    help="macOS say voice used by --local-narration")
     ap.add_argument("--max-frames", type=int, default=0)
     return ap
 
@@ -81,43 +118,136 @@ def _recognized_step_id(previous, engine_result):
     return previous or engine_result.context.current_step_id
 
 
+def _presentation_for(
+    recognized_step_id: str,
+    next_step_id: str | None,
+) -> dict[str, str]:
+    recognized_zh, recognized_en = _STEP_LABELS[recognized_step_id]
+    if next_step_id is None:
+        next_zh, next_en = "任务完成。", "Task complete."
+    else:
+        next_zh, next_en = _NEXT_INSTRUCTIONS[next_step_id]
+    return {
+        "recognized_zh": recognized_zh,
+        "recognized_en": recognized_en,
+        "next_zh": next_zh,
+        "next_en": next_en,
+    }
+
+
+def _local_narration_items(transitions: list[dict]) -> list[dict]:
+    return [
+        {
+            "pts_ms": transition["pts_ms"],
+            "kind": (
+                "complete"
+                if transition["step_id"] == "tomato_released_inside"
+                else "step"
+            ),
+            "step_id": transition["step_id"],
+            "text": _SPEECH_BY_STEP[transition["step_id"]],
+        }
+        for transition in transitions
+        if transition["step_id"] in _SPEECH_BY_STEP
+    ]
+
+
+@lru_cache(maxsize=8)
+def _overlay_font(size: int):
+    return ImageFont.truetype(
+        "/System/Library/Fonts/Hiragino Sans GB.ttc", size=size
+    )
+
+
+def _draw_status_panel(
+    frame: np.ndarray,
+    presentation: dict[str, str],
+    debug_text: str,
+) -> None:
+    height, width = frame.shape[:2]
+    header_h = max(170, int(height * 0.18))
+    footer_h = 36
+    split_x = int(width * 0.45)
+    cv2.rectangle(frame, (0, 0), (split_x, header_h), (18, 36, 24), -1)
+    cv2.rectangle(frame, (split_x, 0), (width, header_h), (28, 28, 28), -1)
+    cv2.rectangle(frame, (0, height - footer_h), (width, height), (18, 18, 18), -1)
+    cv2.line(frame, (split_x, 14), (split_x, header_h - 14), (70, 70, 70), 2)
+
+    image = Image.fromarray(frame[..., ::-1])
+    draw = ImageDraw.Draw(image)
+    left_x = 28
+    right_x = split_x + 28
+    draw.text(
+        (left_x, 12), "已识别 / RECOGNIZED",
+        font=_overlay_font(24), fill=(74, 235, 130), stroke_width=1,
+        stroke_fill=(0, 0, 0),
+    )
+    draw.text(
+        (left_x, 45), presentation["recognized_zh"],
+        font=_overlay_font(46), fill=(255, 255, 255), stroke_width=2,
+        stroke_fill=(0, 0, 0),
+    )
+    draw.text(
+        (left_x, 108), presentation["recognized_en"],
+        font=_overlay_font(28), fill=(215, 235, 220), stroke_width=1,
+        stroke_fill=(0, 0, 0),
+    )
+    draw.text(
+        (right_x, 12), "下一步 / NEXT",
+        font=_overlay_font(24), fill=(255, 202, 64), stroke_width=1,
+        stroke_fill=(0, 0, 0),
+    )
+    draw.text(
+        (right_x, 48), presentation["next_zh"],
+        font=_overlay_font(36), fill=(255, 255, 255), stroke_width=2,
+        stroke_fill=(0, 0, 0),
+    )
+    draw.text(
+        (right_x, 108), presentation["next_en"],
+        font=_overlay_font(23), fill=(255, 225, 145), stroke_width=1,
+        stroke_fill=(0, 0, 0),
+    )
+    draw.text(
+        (12, height - 30), debug_text,
+        font=_overlay_font(18), fill=(215, 215, 215),
+    )
+    frame[:] = np.asarray(image)[..., ::-1]
+
+
 def _draw_annotation_overlay(frame, *, pts_ms, engine, annotations, detections, hands,
                               yolo_ms, recent_events, predicted_step_id):
     h, w = frame.shape[:2]
 
     # ── detection boxes ──
     for label, conf, box in detections:
-        cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 255), 1)
+        cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 255), 4)
         cv2.putText(frame, f"{label} {conf:.2f}", (box[0], box[1] - 4),
-                    _FONT, 0.4, (0, 255, 255), 1)
+                    _FONT, 0.8, (0, 255, 255), 2)
 
     # ── hand skeletons ──
     for hand in hands:
         pts = hand.landmarks_px.astype(int)
         for a, b in HAND_EDGES:
-            cv2.line(frame, tuple(pts[a]), tuple(pts[b]), HAND_COLOR, 1)
+            cv2.line(frame, tuple(pts[a]), tuple(pts[b]), HAND_COLOR, 3)
         for p in pts:
-            cv2.circle(frame, tuple(p), 2, HAND_COLOR, -1)
+            cv2.circle(frame, tuple(p), 4, HAND_COLOR, -1)
 
-    # ── status bar ──
+    # ── bilingual status panel ──
     step = engine.current_step
     ctx = engine.context
     progress = ctx.step_progress
-    score_pct = min(progress.score / max(step.completion_policy.threshold, 1e-6), 1.0)
-    cv2.rectangle(frame, (0, 0), (w, 72), (32, 32, 32), -1)
-
-    lines = [
-        f"Recognized: {predicted_step_id}  |  Next check: {step.id}  "
-        f"Score: {progress.score:.2f}/{step.completion_policy.threshold:.1f}  "
-        f"Hits: {progress.consecutive_hits}/{step.completion_policy.consecutive_hits}",
-        f"YOLO: {yolo_ms:.0f}ms  |  det={len(detections)}  hands={len(hands)}",
-    ]
-    for i, line in enumerate(lines):
-        cv2.putText(frame, line, (8, 18 + i * 18), _FONT, 0.45, (255, 255, 255), 1)
-
-    bar_w = int((w - 16) * score_pct)
-    cv2.rectangle(frame, (8, 58), (8 + bar_w, 64), (0, 220, 0), -1)
-    cv2.rectangle(frame, (8, 58), (w - 8, 64), (90, 90, 90), 1)
+    next_step_id = None if ctx.step_status == "completed" else step.id
+    presentation = _presentation_for(predicted_step_id, next_step_id)
+    _draw_status_panel(
+        frame,
+        presentation,
+        (
+            f"{pts_ms / 1000.0:.2f}s | YOLO {yolo_ms:.0f}ms | "
+            f"detections {len(detections)} | hands {len(hands)} | "
+            f"evidence {progress.score:.2f}/{step.completion_policy.threshold:.2f} | "
+            f"hits {progress.consecutive_hits}/{step.completion_policy.consecutive_hits}"
+        ),
+    )
 
     # ── AI vs Expected ──
     ann = annotations.lookup(pts_ms) if annotations else None
@@ -134,20 +264,16 @@ def _draw_annotation_overlay(frame, *, pts_ms, engine, annotations, detections, 
         comparison = "MISMATCH"
         cmp_color = (0, 0, 255)
 
-    cv2.putText(frame, f"AI Predicted: {predicted_id}", (8, h - 48),
-                _FONT, 0.5, (0, 255, 255), 1)
-    cv2.putText(frame, f"Expected: {expected_id}", (8, h - 24),
-                _FONT, 0.5, (200, 200, 200), 1)
-    cv2.putText(frame, comparison, (w - 120, h - 36),
-                _FONT, 0.55, cmp_color, 2)
-
-    # ── time ──
-    cv2.putText(frame, f"{pts_ms / 1000.0:.2f}s", (w - 90, 18),
-                _FONT, 0.45, (200, 200, 200), 1)
+    cv2.rectangle(frame, (8, h - 92), (410, h - 44), (24, 24, 24), -1)
+    cv2.putText(frame, f"Expected: {expected_id}", (20, h - 60),
+                _FONT, 0.65, (225, 225, 225), 2)
+    cv2.rectangle(frame, (w - 190, h - 102), (w - 8, h - 44), cmp_color, -1)
+    cv2.putText(frame, comparison, (w - 174, h - 64),
+                _FONT, 0.8, (255, 255, 255), 2)
 
     # ── recent events ──
     for i, ev in enumerate(recent_events[-3:]):
-        cv2.putText(frame, ev[:60], (8, h - 70 - i * 16),
+        cv2.putText(frame, ev[:60], (8, h - 110 - i * 20),
                     _FONT, 0.35, (160, 200, 255), 1)
 
     return {
@@ -158,6 +284,9 @@ def _draw_annotation_overlay(frame, *, pts_ms, engine, annotations, detections, 
 
 
 def run(args: argparse.Namespace) -> None:
+    if args.local_narration and not args.render_video:
+        raise ValueError("--local-narration requires --render-video")
+
     cfg = DomainConfig.load(DOMAIN_PACK)
     recipe = load_recipe("sop/tomato_to_fridge.json")
 
@@ -410,6 +539,16 @@ def run(args: argparse.Namespace) -> None:
             return s[int(k)]
         return s[f] * (c - k) + s[c] * (k - f)
 
+    narrated_path = None
+    if args.local_narration:
+        narration_items = _local_narration_items(predicted_transitions)
+        (paths.root / "narration.json").write_text(
+            json.dumps(narration_items, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        narrated_path = narrate_run(paths.root, backend="say", voice=args.voice)
+        print(f"annotated_narrated.mp4: {narrated_path}")
+
     ctx = engine.context
     summary = {
         "source": args.source,
@@ -420,6 +559,7 @@ def run(args: argparse.Namespace) -> None:
             "stability_frames": stability, "fridge_fallback": list(fridge_fallback),
         },
         "annotated_video": str(paths.root / "annotated.mp4") if writer else None,
+        "narrated_video": str(narrated_path) if narrated_path else None,
         "annotations_path": args.annotations,
         "total_frames": frame_idx,
         "inference_count": len(yolo_latencies),
