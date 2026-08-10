@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from server.engine.sop import load_recipe
@@ -73,3 +74,39 @@ def test_old_sops_still_load_without_new_fields() -> None:
             assert rule.source_group == "default"
         assert step.completion_policy.min_source_groups == 1
         assert step.completion_policy.evidence_window_ms == 5000
+
+
+# ── Fix 5: frozen schema declares all task-contract fields ──
+
+
+def test_schema_declares_task_graph_fields() -> None:
+    schema_text = (REPO_ROOT / "sop" / "schema.json").read_text(encoding="utf-8")
+    schema = json.loads(schema_text)
+
+    step_props = schema["$defs"]["step"]["properties"]
+    assert "next_step_id" in step_props
+    assert "recovery_transitions" in step_props
+
+    policy_props = schema["$defs"]["completionPolicy"]["properties"]
+    assert "evidence_window_ms" in policy_props
+    assert "min_source_groups" in policy_props
+
+    rule_props = schema["$defs"]["evidenceRule"]["properties"]
+    assert "source_group" in rule_props
+
+    recovery = schema["$defs"]["recoveryTransition"]
+    assert recovery["required"] == ["event_type", "payload_matches", "target_step_id"]
+    assert "event_type" in recovery["properties"]
+    assert "payload_matches" in recovery["properties"]
+    assert "target_step_id" in recovery["properties"]
+
+
+def test_tomato_to_fridge_json_passes_pydantic_validation() -> None:
+    recipe = load_recipe(REPO_ROOT / "sop" / "tomato_to_fridge.json")
+    for step in recipe.steps:
+        if step.next_step_id is not None:
+            assert step.next_step_id != ""
+        for edge in step.recovery_transitions:
+            assert edge.event_type != ""
+            assert edge.target_step_id != ""
+            assert isinstance(edge.payload_matches, dict)

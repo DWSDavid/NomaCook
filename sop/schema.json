@@ -59,6 +59,12 @@
         "tips": {"type": "array", "items": {"type": "string"}},
         "failure_modes": {"type": "array", "items": {"type": "string"}},
         "high_risk": {"type": "boolean", "default": false},
+        "next_step_id": {"type": ["string", "null"], "minLength": 1},
+        "recovery_transitions": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/recoveryTransition"},
+          "default": []
+        },
         "completion_policy": {"$ref": "#/$defs/completionPolicy"}
       }
     },
@@ -75,6 +81,8 @@
         "question_min_score": {"type": "number", "minimum": 0, "maximum": 1},
         "question_after_ms": {"type": "integer", "minimum": 0},
         "question": {"type": "string", "minLength": 1},
+        "evidence_window_ms": {"type": "integer", "minimum": 100, "default": 5000},
+        "min_source_groups": {"type": "integer", "minimum": 1, "default": 1},
         "evidence_rules": {
           "type": "array",
           "minItems": 1,
@@ -92,7 +100,18 @@
         "payload_matches": {"type": "object"},
         "weight": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
         "min_confidence": {"type": "number", "minimum": 0, "maximum": 1},
-        "advances_confirmation_streak": {"type": "boolean", "default": true}
+        "advances_confirmation_streak": {"type": "boolean", "default": true},
+        "source_group": {"type": "string", "minLength": 1, "default": "default"}
+      }
+    },
+    "recoveryTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_type", "payload_matches", "target_step_id"],
+      "properties": {
+        "event_type": {"type": "string", "minLength": 1},
+        "payload_matches": {"type": "object", "default": {}},
+        "target_step_id": {"type": "string", "minLength": 1}
       }
     }
   }

@@ -230,3 +230,95 @@ def test_evidence_outside_window_does_not_accumulate() -> None:
     result2 = engine.consume(late)
     assert result2.context.step_progress.score == pytest.approx(0.8)
     assert result2.status != "session_completed"
+
+
+# ── Fix 1: stale recovery event ──
+
+
+def test_stale_recovery_event_must_not_change_state() -> None:
+    engine = _make_engine(step_index=3)
+    assert engine.current_step.id == "tomato_held"
+
+    # recovery event with frame age > MAX_FRAME_AGE_MS
+    stale_event = create_event(
+        event_id="evt_stale_rec",
+        session_id="ses_recovery",
+        seq=1,
+        event_type="OBJECT_RETURNED_TO_REGION",
+        t_device_ms=100.0,
+        t_server_est=BASE_TIME,
+        received_at=BASE_TIME + timedelta(seconds=5),
+        source="test",
+        payload={"object": "tomato", "region": "table"},
+        context_version=engine.context.context_version,
+    )
+
+    result = engine.consume(stale_event)
+    assert result.status == "stale"
+    assert engine.current_step.id == "tomato_held"
+    assert engine.context.step_progress.score == 0.0
+
+
+# ── Fix 2: SHADOW dedup isolation ──
+
+
+def test_shadow_event_does_not_block_same_id_run_event() -> None:
+    engine = _make_engine()
+    event_id = "evt_shadow_then_run"
+
+    shadow = create_event(
+        event_id=event_id,
+        session_id="ses_recovery",
+        seq=1,
+        event_type="OBJECT_PRESENT",
+        t_device_ms=100.0,
+        t_server_est=BASE_TIME,
+        received_at=BASE_TIME,
+        source="test",
+        confidence=0.9,
+        payload={"object": "tomato"},
+        runtime_mode="SHADOW",
+    )
+
+    run = shadow.model_copy(update={"runtime_mode": "RUN"})
+
+    r1 = engine.consume(shadow)
+    assert r1.status == "shadow_ignored"
+
+    r2 = engine.consume(run)
+    assert r2.status == "evidence_added"
+    assert engine.context.step_progress.score == pytest.approx(0.4)
+
+
+# ── Fix 3: window expiry fully clears uncertainty ──
+
+
+def test_window_expiry_clears_uncertainty_and_prevents_question() -> None:
+    engine = _make_engine(step_index=7)
+    assert engine.current_step.id == "tomato_released_inside"
+
+    first = _make_event(
+        seq=1,
+        event_type="VISIBILITY_LOST",
+        payload={"object": "tomato"},
+        confidence=0.95,
+        at_ms=1000,
+    )
+    later = _make_event(
+        seq=2,
+        event_type="VISIBILITY_LOST",
+        payload={"object": "tomato"},
+        confidence=0.95,
+        at_ms=6000,
+    )
+
+    r1 = engine.consume(first)
+    assert r1.status == "evidence_added"
+    assert r1.context.step_progress.score == pytest.approx(0.4)
+    assert r1.context.step_progress.uncertain_since is not None
+
+    r2 = engine.consume(later)
+    assert r2.status != "question_pending"
+    assert r2.context.pending_question is None
+    assert r2.context.step_progress.uncertain_since is not None
+    assert r2.context.step_progress.score == pytest.approx(0.4)

@@ -8,6 +8,7 @@ import pytest
 
 from server.vlm import VLMDecisionRequest, VLMObservation, validate_observation
 from server.vlm.client import GeminiVLMClient, SYSTEM_PROMPT
+from server.pipeline.evidence import scripted_event
 
 
 NOW = datetime(2026, 7, 23, 10, 0, tzinfo=UTC)
@@ -151,3 +152,65 @@ def test_gemini_prompt_appends_detector_context_as_non_authoritative_hint() -> N
     assert request.detection_context in prompt
     assert "只能当提示，绝不能当结论" in SYSTEM_PROMPT
     assert "冲突时相信画面" in SYSTEM_PROMPT
+
+
+# ── Fix 4: context_version propagation ──
+
+
+def test_vlm_to_event_passes_context_version() -> None:
+    result = validate_observation(
+        make_request(), make_observation(), received_at=NOW + timedelta(seconds=2)
+    )
+    event = result.to_event(seq=10, t_device_ms=9_000, source="gemini_vlm_v1")
+    assert event.context_version == 7
+
+
+def test_scripted_vlm_event_passes_context_version() -> None:
+    event = scripted_event(
+        {
+            "pts_ms": 400,
+            "type": "vlm.step_assessment",
+            "step_id": "step_03",
+            "phase": "likely_complete",
+            "confidence": 0.85,
+        },
+        index=0,
+        session_id="ses_x",
+        seq=6,
+        question_event_id=None,
+        context_version=12,
+    )
+    assert event.context_version == 12
+    assert event.type == "vlm.step_assessment"
+
+
+def test_scripted_voice_event_passes_context_version() -> None:
+    event = scripted_event(
+        {
+            "pts_ms": 600,
+            "type": "voice.user_confirmation",
+            "step_id": "step_03",
+        },
+        index=1,
+        session_id="ses_x",
+        seq=7,
+        question_event_id="evt_q",
+        context_version=8,
+    )
+    assert event.context_version == 8
+    assert event.type == "voice.user_confirmation"
+
+
+def test_scripted_event_context_version_defaults_to_none() -> None:
+    event = scripted_event(
+        {
+            "pts_ms": 400,
+            "type": "vlm.step_assessment",
+            "step_id": "step_01",
+        },
+        index=0,
+        session_id="ses_x",
+        seq=5,
+        question_event_id=None,
+    )
+    assert event.context_version is None

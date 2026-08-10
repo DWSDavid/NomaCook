@@ -144,6 +144,12 @@ class StateEngine:
             raise SessionMismatch(
                 f"event session {event.session_id!r} != {self._context.session_id!r}"
             )
+
+        if event.runtime_mode != "RUN":
+            # ponytail: shadow/replay must never enter _seen_event_ids, must not
+            # advance context version, and must not write live state.
+            return EngineResult(status="shadow_ignored", context=self._context)
+
         if event.event_id in self._seen_event_ids:
             return EngineResult(status="duplicate", context=self._context)
         if event.seq <= self._context.last_seq:
@@ -152,9 +158,6 @@ class StateEngine:
             )
 
         self._seen_event_ids.add(event.event_id)
-
-        if event.runtime_mode != "RUN":
-            return EngineResult(status="shadow_ignored", context=self._context)
 
         if (
             event.context_version is not None
@@ -171,21 +174,7 @@ class StateEngine:
             )
             return EngineResult(status="session_completed", context=self._context)
 
-        recovery = next(
-            (
-                edge
-                for edge in self.current_step.recovery_transitions
-                if edge.event_type == event.type
-                and all(
-                    event.payload.get(key) == value
-                    for key, value in edge.payload_matches.items()
-                )
-            ),
-            None,
-        )
-        if recovery is not None:
-            return self._recover_to(event, recovery.target_step_id)
-
+        # ── stale check *before* recovery ──
         frame_age_ms = max(
             0.0, (event.received_at - event.t_server_est).total_seconds() * 1000.0
         )
@@ -205,6 +194,21 @@ class StateEngine:
             )
             return EngineResult(status="stale", context=self._context)
 
+        recovery = next(
+            (
+                edge
+                for edge in self.current_step.recovery_transitions
+                if edge.event_type == event.type
+                and all(
+                    event.payload.get(key) == value
+                    for key, value in edge.payload_matches.items()
+                )
+            ),
+            None,
+        )
+        if recovery is not None:
+            return self._recover_to(event, recovery.target_step_id)
+
         step = self.current_step
         rules = (
             [rule for rule in step.completion_policy.evidence_rules if _matches(event, rule)]
@@ -221,11 +225,7 @@ class StateEngine:
             > step.completion_policy.evidence_window_ms
         )
         if window_expired:
-            progress = StepProgress(
-                score=0.0,
-                consecutive_hits=0,
-                uncertain_since=progress.uncertain_since,
-            )
+            progress = StepProgress()
 
         matched_ids = set(progress.matched_rule_ids)
         matched_groups = set(progress.matched_source_groups)

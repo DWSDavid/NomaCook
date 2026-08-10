@@ -141,6 +141,7 @@ class ValidatedVLMResult(BaseModel):
             backfill=self.stale_reason == "ttl_expired",
             confidence=self.observation.confidence,
             payload=payload,
+            context_version=self.request.context_version,
         )
 
 
