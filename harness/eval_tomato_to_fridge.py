@@ -75,8 +75,14 @@ def _to_xyxy(box) -> tuple[int, int, int, int]:
     return (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
 
 
+def _recognized_step_id(previous, engine_result):
+    if engine_result.transition is not None:
+        return engine_result.transition.completed_step_id
+    return previous or engine_result.context.current_step_id
+
+
 def _draw_annotation_overlay(frame, *, pts_ms, engine, annotations, detections, hands,
-                              yolo_ms, recent_events):
+                              yolo_ms, recent_events, predicted_step_id):
     h, w = frame.shape[:2]
 
     # ── detection boxes ──
@@ -101,7 +107,7 @@ def _draw_annotation_overlay(frame, *, pts_ms, engine, annotations, detections, 
     cv2.rectangle(frame, (0, 0), (w, 72), (32, 32, 32), -1)
 
     lines = [
-        f"Step {step.sequence}/{len(engine.recipe.steps)}: {step.id}  "
+        f"Recognized: {predicted_step_id}  |  Next check: {step.id}  "
         f"Score: {progress.score:.2f}/{step.completion_policy.threshold:.1f}  "
         f"Hits: {progress.consecutive_hits}/{step.completion_policy.consecutive_hits}",
         f"YOLO: {yolo_ms:.0f}ms  |  det={len(detections)}  hands={len(hands)}",
@@ -115,7 +121,7 @@ def _draw_annotation_overlay(frame, *, pts_ms, engine, annotations, detections, 
 
     # ── AI vs Expected ──
     ann = annotations.lookup(pts_ms) if annotations else None
-    predicted_id = engine.context.current_step_id
+    predicted_id = predicted_step_id
     expected_id = ann.expected_step_id if ann else "UNLABELED"
 
     if ann is None:
@@ -224,15 +230,17 @@ def run(args: argparse.Namespace) -> None:
     mismatched_frames = 0
     predicted_transitions: list[dict] = []
     last_step_id: str | None = None
+    recognized_step_id: str | None = None
 
     with latency_path.open("w", newline="") as lf:
         lw = csv.writer(lf)
         lw.writerow(["frame_idx", "inference_ran", "yolo_ms", "hand_ms", "state_update_ms", "total_ms"])
 
     def emit(envelope):
-        nonlocal total_events
+        nonlocal total_events, recognized_step_id
         t0 = time.monotonic()
-        engine.consume(envelope)
+        result = engine.consume(envelope)
+        recognized_step_id = _recognized_step_id(recognized_step_id, result)
         state_latencies.append((time.monotonic() - t0) * 1000.0)
         total_events += 1
         event_counts[envelope.type] = event_counts.get(envelope.type, 0) + 1
@@ -302,7 +310,7 @@ def run(args: argparse.Namespace) -> None:
                     emitted_types.append(tev.event_type)
 
             # ── track predicted transitions ──
-            cur_step = engine.context.current_step_id
+            cur_step = recognized_step_id or engine.context.current_step_id
             if cur_step != last_step_id:
                 predicted_transitions.append({
                     "step_id": cur_step, "first_frame": frame_idx, "pts_ms": round(pts_ms, 2),
@@ -314,6 +322,7 @@ def run(args: argparse.Namespace) -> None:
                 "frame_idx": frame_idx, "pts_ms": round(pts_ms, 2),
                 "inference_ran": inference_ran,
                 "current_step_id": cur_step,
+                "next_step_id": engine.context.current_step_id,
                 "raw_detections": [
                     {"label": d.label, "conf": round(d.conf, 3), "box": _to_xyxy(d.box)}
                     for d in raw_dets
@@ -346,6 +355,7 @@ def run(args: argparse.Namespace) -> None:
                     detections=can_dets if inference_ran else [],
                     hands=hands, yolo_ms=yolo_ms_last,
                     recent_events=[],
+                    predicted_step_id=cur_step,
                 )
                 with comp_path.open("a", encoding="utf-8") as f:
                     f.write(json.dumps({
@@ -369,6 +379,7 @@ def run(args: argparse.Namespace) -> None:
                     detections=can_dets if inference_ran else [],
                     hands=hands, yolo_ms=yolo_ms_last,
                     recent_events=[],
+                    predicted_step_id=cur_step,
                 )
 
             if writer is not None:
@@ -414,7 +425,8 @@ def run(args: argparse.Namespace) -> None:
         "inference_count": len(yolo_latencies),
         "total_events": total_events,
         "event_type_counts": event_counts,
-        "final_step_id": ctx.current_step_id,
+        "final_step_id": recognized_step_id or ctx.current_step_id,
+        "next_step_id": ctx.current_step_id,
         "step_status": ctx.step_status,
         "final_score": round(ctx.step_progress.score, 3),
         "context_version": ctx.context_version,

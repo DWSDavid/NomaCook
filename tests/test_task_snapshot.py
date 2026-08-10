@@ -55,15 +55,15 @@ def test_snapshot_updates_after_evidence() -> None:
         )
     )
     snapshot = build_task_snapshot(engine.context, engine.current_step)
-    assert snapshot.belief == 0.4
+    assert snapshot.state == "tomato_on_table"
+    assert snapshot.belief == 0.0
     assert snapshot.last_event_seq == 1
 
 
 def test_snapshot_shows_missing_evidence_for_unmatched_rules() -> None:
     engine = _make_engine()
     snapshot = build_task_snapshot(engine.context, engine.current_step)
-    assert "fridge_visible" in snapshot.missing_evidence
-    assert "tomato_visible" in snapshot.missing_evidence
+    assert snapshot.missing_evidence == ("tomato_visible",)
 
     engine.consume(
         create_event(
@@ -80,5 +80,4 @@ def test_snapshot_shows_missing_evidence_for_unmatched_rules() -> None:
         )
     )
     snapshot = build_task_snapshot(engine.context, engine.current_step)
-    assert "tomato_visible" not in snapshot.missing_evidence
-    assert "fridge_visible" in snapshot.missing_evidence
+    assert snapshot.missing_evidence == ("tomato_stable_on_table",)

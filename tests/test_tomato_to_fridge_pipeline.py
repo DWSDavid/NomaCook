@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import harness.eval_tomato_to_fridge as eval_harness
 
 from perception.detector import ObjectDetector
 from perception.fusion import InteractionTracker
@@ -154,9 +155,12 @@ def test_pipeline_destination_present_from_fridge_detection() -> None:
     frame = _red_tomato_blue_fridge_frame()
     dets = _detect(frame)
     can = canonicalize_detections(dets)
-    events = tracker.update(t_ms=100, detections=can, hands=[], interaction_events=[])
+    first = tracker.update(t_ms=100, detections=can, hands=[], interaction_events=[])
+    second = tracker.update(t_ms=200, detections=can, hands=[], interaction_events=[])
+    third = tracker.update(t_ms=300, detections=can, hands=[], interaction_events=[])
 
-    dest = [e for e in events if e.event_type == "DESTINATION_PRESENT"]
+    assert not any(e.event_type == "DESTINATION_PRESENT" for e in first + second)
+    dest = [e for e in third if e.event_type == "DESTINATION_PRESENT"]
     assert len(dest) == 1
     assert dest[0].payload["region"] == "refrigerator_interior"
 
@@ -189,11 +193,134 @@ def test_pipeline_events_feed_state_engine_and_accumulate_score() -> None:
             seq += 1
 
     ctx = engine.context
-    assert ctx.step_progress.score > 0
+    assert ctx.current_step_id == "hand_near_tomato"
     assert "OBJECT_PRESENT" in emitted_types
     assert "DESTINATION_PRESENT" in emitted_types
     snap = build_task_snapshot(ctx, engine.current_step)
     assert snap.task_id == "tomato_to_fridge_v1"
+
+
+def test_real_video_start_advances_without_fridge_in_view() -> None:
+    """A stationary tomato must establish the start state before the fridge appears."""
+    recipe = load_recipe("sop/tomato_to_fridge.json")
+    engine = StateEngine(session_id=SESSION_ID, recipe=recipe, started_at=SESSION_EPOCH)
+    tracker = TomatoToFridgeTracker(
+        frame_width=1920, frame_height=1080, stability_frames=3,
+    )
+
+    seq = 0
+    samples = [
+        (0.27, (858, 445, 1048, 631)),
+        (0.40, (862, 449, 1052, 635)),
+        (0.50, (868, 453, 1058, 639)),
+        (0.59, (875, 457, 1063, 643)),
+    ]
+    for i, (confidence, box) in enumerate(samples):
+        for event in tracker.update(
+            t_ms=i * 100.0,
+            detections=[("tomato", confidence, box)],
+            hands=[],
+            interaction_events=[],
+        ):
+            engine.consume(create_event(
+                session_id=SESSION_ID,
+                seq=seq,
+                event_type=event.event_type,
+                t_device_ms=i * 100.0,
+                t_server_est=t_server_for(i * 100.0),
+                received_at=t_server_for(i * 100.0),
+                source="test",
+                event_id=event_id_for(SESSION_ID, seq),
+                confidence=event.confidence,
+                payload=event.payload,
+            ))
+            seq += 1
+
+    assert engine.context.current_step_id == "hand_near_tomato"
+
+
+def test_video_style_sequence_reaches_completion() -> None:
+    """Task events from a first-person sequence must drive the real state engine."""
+    recipe = load_recipe("sop/tomato_to_fridge.json")
+    engine = StateEngine(session_id=SESSION_ID, recipe=recipe, started_at=SESSION_EPOCH)
+    tracker = TomatoToFridgeTracker(
+        frame_width=1920, frame_height=1080, stability_frames=3,
+    )
+    seq = 0
+    tick = 0
+
+    def update(detections, interactions=()):
+        nonlocal seq, tick
+        events = tracker.update(
+            t_ms=tick * 100.0,
+            detections=detections,
+            hands=[],
+            interaction_events=interactions,
+        )
+        for event in events:
+            engine.consume(create_event(
+                session_id=SESSION_ID,
+                seq=seq,
+                event_type=event.event_type,
+                t_device_ms=tick * 100.0,
+                t_server_est=t_server_for(tick * 100.0),
+                received_at=t_server_for(tick * 100.0),
+                source="test",
+                event_id=event_id_for(SESSION_ID, seq),
+                confidence=event.confidence,
+                payload=event.payload,
+            ))
+            seq += 1
+        tick += 1
+
+    tomato = lambda x, y, confidence=0.8: (
+        "tomato", confidence, (x - 90, y - 80, x + 90, y + 80)
+    )
+    fridge = ("refrigerator", 0.8, (0, 0, 1500, 1080))
+
+    for x in (950, 954, 958, 960):
+        update([tomato(x, 540)])
+    update([tomato(960, 540)], [("hand_near_object", "right", "tomato")])
+    update([tomato(930, 520)], [("hand_holding_object", "right", "tomato")])
+    for x, y in ((880, 500), (810, 470), (700, 430), (620, 400)):
+        update([tomato(x, y)])
+
+    update([tomato(620, 400), ("refrigerator", 0.10, (800, 0, 1910, 1080))])
+    assert engine.context.current_step_id == "fridge_interaction"
+
+    for _ in range(3):
+        update([tomato(1300, 600), fridge])
+    for _ in range(5):
+        update([fridge])
+    for _ in range(3):
+        update([tomato(820, 650), fridge])
+    update(
+        [tomato(820, 650), fridge],
+        [("hand_near_object_end", "right", "tomato")],
+    )
+    for x, y in ((820, 650), (822, 651), (821, 650), (820, 650)):
+        update([tomato(x, y), fridge])
+
+    assert engine.context.step_status == "completed"
+
+
+def test_overlay_reports_last_recognized_phase_not_next_instruction() -> None:
+    recipe = load_recipe("sop/tomato_to_fridge.json")
+    engine = StateEngine(session_id=SESSION_ID, recipe=recipe, started_at=SESSION_EPOCH)
+    result = engine.consume(create_event(
+        session_id=SESSION_ID,
+        seq=0,
+        event_type="OBJECT_PRESENT",
+        t_device_ms=100.0,
+        t_server_est=t_server_for(100.0),
+        received_at=t_server_for(100.0),
+        source="test",
+        event_id=event_id_for(SESSION_ID, 0),
+        confidence=0.9,
+        payload={"object": "tomato"},
+    ))
+    assert engine.context.current_step_id == "tomato_on_table"
+    assert eval_harness._recognized_step_id(None, result) == "ready"
 
 
 def test_snapshot_output_contains_required_fields() -> None:

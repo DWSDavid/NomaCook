@@ -110,8 +110,8 @@ def test_null_context_fast_cv_event_still_accepted() -> None:
         context_version=None,
     )
     result = engine.consume(event)
-    assert result.status == "evidence_added"
-    assert engine.context.step_progress.score == pytest.approx(0.4)
+    assert result.status == "step_completed"
+    assert engine.context.current_step_id == "tomato_on_table"
 
 
 def test_recovery_from_held_to_table() -> None:
@@ -207,29 +207,29 @@ def test_one_source_group_cannot_satisfy_two_source_policy() -> None:
 
 
 def test_evidence_outside_window_does_not_accumulate() -> None:
-    engine = _make_engine(step_index=7)
-    assert engine.current_step.id == "tomato_released_inside"
+    engine = _make_engine(step_index=3)
+    assert engine.current_step.id == "tomato_held"
 
     first = _make_event(
         seq=1,
-        event_type="VISIBILITY_LOST",
+        event_type="HOLDING_STARTED",
         payload={"object": "tomato"},
         confidence=0.95,
         at_ms=1000,
     )
     late = _make_event(
         seq=2,
-        event_type="OBJECT_STABLE_IN_REGION",
-        payload={"object": "tomato", "region": "refrigerator_interior"},
+        event_type="OBJECT_MOVING_WITH_HAND",
+        payload={"object": "tomato"},
         confidence=0.95,
         at_ms=5500,
     )
 
     result1 = engine.consume(first)
-    assert result1.context.step_progress.score == pytest.approx(0.4)
+    assert result1.context.step_progress.score == pytest.approx(0.5)
     result2 = engine.consume(late)
-    assert result2.context.step_progress.score == pytest.approx(0.8)
-    assert result2.status != "session_completed"
+    assert result2.context.step_progress.score == pytest.approx(0.4)
+    assert result2.status != "step_completed"
 
 
 # ── Fix 1: stale recovery event ──
@@ -286,8 +286,8 @@ def test_shadow_event_does_not_block_same_id_run_event() -> None:
     assert r1.status == "shadow_ignored"
 
     r2 = engine.consume(run)
-    assert r2.status == "evidence_added"
-    assert engine.context.step_progress.score == pytest.approx(0.4)
+    assert r2.status == "step_completed"
+    assert engine.context.current_step_id == "tomato_on_table"
 
 
 # ── Fix 3: window expiry fully clears uncertainty ──

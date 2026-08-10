@@ -6,8 +6,8 @@ relative to table/fridge regions into the event vocabulary defined in
 sop/tomato_to_fridge.json.
 
 Regions:
-  - TABLE: bottom portion of frame (default y > 70% height)
-  - FRIDGE_INTERIOR: detected refrigerator bounding box, or fixed fallback zone
+  - TABLE: learned from the tomato's stable starting position
+  - FRIDGE_INTERIOR: refrigerator detected consistently across frames
 
 Events produced (mapped to SOP evidence_rules event_type):
   OBJECT_PRESENT          — YOLO detects tomato
@@ -43,6 +43,7 @@ STABILITY_FRAMES = 3
 TRANSITION_FRAMES = 2
 MIN_DISPLACEMENT_PX = 15.0
 MIN_SHARED_MOTION_FRAMES = 2
+MIN_FRIDGE_CONFIDENCE = 0.35
 
 # ── label canonicalization ──
 CANONICAL_LABELS: dict[str, str] = {
@@ -107,12 +108,16 @@ class TomatoToFridgeTracker:
         self._h = frame_height
         self._table_y0 = int(table_fraction * frame_height)
         self._fridge_box: Box | None = None
+        self._fridge_detect_counter: int = 0
         self._fridge_fallback: Box = (
             0, 0, int(frame_width * FRIDGE_FALLBACK_FRACTION), int(frame_height * 0.5)
         )
         self._stability = stability_frames
 
         self._tomato_history: deque[tuple[Point, float]] = deque(maxlen=16)
+        self._origin_anchor: Point | None = None
+        self._origin_radius = max(60.0, min(frame_width, frame_height) * 0.10)
+        self._stationary_radius = max(15.0, min(frame_width, frame_height) * 0.025)
 
         self._in_table: bool = False
         self._in_fridge: bool = False
@@ -127,6 +132,8 @@ class TomatoToFridgeTracker:
         self._holding_active: bool = False
         self._fridge_announced: bool = False
         self._tomato_lost_counter: int = 0
+        self._tomato_missing_after_fridge: bool = False
+        self._release_observed: bool = False
 
         self._seen_events: set[str] = set()
 
@@ -136,7 +143,7 @@ class TomatoToFridgeTracker:
 
     @property
     def fridge_region(self) -> Box:
-        return self._fridge_box or self._fridge_fallback
+        return self._fridge_box or (0, 0, 0, 0)
 
     def update(
         self,
@@ -156,18 +163,24 @@ class TomatoToFridgeTracker:
 
         # ── update fridge region ──
         fridge_det = None
+        fridge_conf = 0.0
         for label, conf, box in detections:
             if label == "refrigerator":
                 fridge_det = box
+                fridge_conf = conf
                 break
-        if fridge_det is not None:
-            self._fridge_box = fridge_det
-            if not self._fridge_announced:
+        if fridge_det is not None and fridge_conf >= MIN_FRIDGE_CONFIDENCE:
+            self._fridge_detect_counter += 1
+            if self._fridge_detect_counter >= self._stability:
+                self._fridge_box = fridge_det
+            if self._fridge_box is not None and not self._fridge_announced:
                 events.append(TomatoToFridgeEvent(
                     t_ms, "DESTINATION_PRESENT",
-                    {"region": "refrigerator_interior"}, confidence=0.85,
+                    {"region": "refrigerator_interior"}, confidence=fridge_conf,
                 ))
                 self._fridge_announced = True
+        elif self._fridge_box is None:
+            self._fridge_detect_counter = 0
 
         # ── update tomato position ──
         tomato_pos: Point | None = None
@@ -183,6 +196,8 @@ class TomatoToFridgeTracker:
             self._tomato_lost_counter = 0
         else:
             self._tomato_lost_counter += 1
+            if self._fridge_box is not None and self._tomato_lost_counter >= self._stability:
+                self._tomato_missing_after_fridge = True
             if self._tomato_lost_counter >= self._stability and not self._has_fired("VISIBILITY_LOST"):
                 events.append(TomatoToFridgeEvent(
                     t_ms, "VISIBILITY_LOST",
@@ -193,18 +208,33 @@ class TomatoToFridgeTracker:
             self._tomato_lost_counter = 0
 
         # ── object present event ──
-        if tomato_pos is not None and not self._has_fired("OBJECT_PRESENT_tomato"):
+        if tomato_pos is not None:
             events.append(TomatoToFridgeEvent(
                 t_ms, "OBJECT_PRESENT",
                 {"object": "tomato"}, confidence=tomato_conf,
             ))
-            self._mark_fired("OBJECT_PRESENT_tomato")
 
         # ── region checks ──
-        table_box = self.table_region
         fridge_box = self.fridge_region
-        in_table_now = tomato_pos is not None and _point_in_box(tomato_pos, table_box)
-        in_fridge_now = tomato_pos is not None and _point_in_box(tomato_pos, fridge_box)
+        if self._origin_anchor is None and len(self._tomato_history) >= self._stability:
+            recent = [item[0] for item in list(self._tomato_history)[-self._stability:]]
+            if max(_distance(recent[0], point) for point in recent[1:]) <= self._stationary_radius:
+                self._origin_anchor = (
+                    sum(point[0] for point in recent) / len(recent),
+                    sum(point[1] for point in recent) / len(recent),
+                )
+                self._stable_table_counter = self._stability - 1
+        in_table_now = (
+            tomato_pos is not None
+            and self._origin_anchor is not None
+            and _distance(tomato_pos, self._origin_anchor) <= self._origin_radius
+        )
+        in_fridge_now = (
+            tomato_pos is not None
+            and self._fridge_box is not None
+            and self._tomato_missing_after_fridge
+            and _point_in_box(tomato_pos, fridge_box)
+        )
 
         # ── OBJECT_STABLE_IN_REGION ──
         if in_table_now:
@@ -222,7 +252,7 @@ class TomatoToFridgeTracker:
         else:
             self._stable_table_counter = max(0, self._stable_table_counter - 1)
 
-        if in_fridge_now:
+        if in_fridge_now and self._in_fridge and self._release_observed:
             self._stable_fridge_counter += 1
             if self._stable_fridge_counter >= self._stability:
                 self._in_fridge = True
@@ -262,6 +292,7 @@ class TomatoToFridgeTracker:
                     confidence=tomato_conf,
                 ))
                 self._mark_fired("ENTERED_fridge")
+                self._in_fridge = True
                 self._fridge_entry_counter = 0
         elif not in_fridge_now:
             self._fridge_entry_counter = 0
@@ -311,6 +342,11 @@ class TomatoToFridgeTracker:
                 events.append(TomatoToFridgeEvent(
                     t_ms, "HAND_NEAR_ENDED", {},
                 ))
+                if self._in_fridge:
+                    self._release_observed = True
+                    events.append(TomatoToFridgeEvent(
+                        t_ms, "HOLDING_ENDED", {"object": "tomato"},
+                    ))
             elif ev_name == "hand_holding_object":
                 self._holding_active = True
                 events.append(TomatoToFridgeEvent(
@@ -322,6 +358,8 @@ class TomatoToFridgeTracker:
                     events.append(TomatoToFridgeEvent(
                         t_ms, "HOLDING_ENDED", {"object": "tomato"},
                     ))
+                if self._in_fridge:
+                    self._release_observed = True
                 self._holding_active = False
 
         # ── DESTINATION_INTERACTION ──

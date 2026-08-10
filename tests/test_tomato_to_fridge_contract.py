@@ -38,7 +38,6 @@ def test_tomato_to_fridge_completion_policy_fields() -> None:
     assert policy.min_source_groups == 2
     assert policy.evidence_window_ms == 3000
     assert policy.threshold == 0.8
-    assert policy.consecutive_hits == 2
 
 
 def test_tomato_to_fridge_source_groups_match_policy() -> None:

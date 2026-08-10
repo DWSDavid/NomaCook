@@ -40,10 +40,12 @@ canonical_map:
 
 regions:
   table:
-    type: frame_fraction
+    type: initial_object_anchor
+    # Kept for loader compatibility; the tracker learns the real origin.
     fraction: 0.70
   refrigerator_interior:
-    type: detected_or_fallback
+    type: stable_detected
+    # Kept for loader compatibility; an unconfirmed fallback is never trusted.
     fallback_box:
       x1: 0
       y1: 0
@@ -52,7 +54,7 @@ regions:
 
 steps:
   ready:
-    objects_detect: [tomato, refrigerator]
+    objects_detect: [tomato]
   tomato_on_table:
     objects_detect: [tomato]
   hand_near_tomato:
