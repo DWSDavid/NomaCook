@@ -360,6 +360,7 @@ def run(args: argparse.Namespace) -> None:
     predicted_transitions: list[dict] = []
     last_step_id: str | None = None
     recognized_step_id: str | None = None
+    last_engine_step: str | None = None
 
     with latency_path.open("w", newline="") as lf:
         lw = csv.writer(lf)
@@ -445,6 +446,7 @@ def run(args: argparse.Namespace) -> None:
                     "step_id": cur_step, "first_frame": frame_idx, "pts_ms": round(pts_ms, 2),
                 })
                 last_step_id = cur_step
+                task_tracker.reset_region_events()
 
             # ── observations ──
             obs_row = {
@@ -520,6 +522,13 @@ def run(args: argparse.Namespace) -> None:
                       f"step={cur_step}  score={engine.context.step_progress.score:.2f}")
             if args.max_frames and frame_idx >= args.max_frames:
                 break
+
+            # ── reset tracker on real engine step transition ──
+            engine_step = engine.context.current_step_id
+            if engine_step != last_engine_step:
+                if last_engine_step is not None:
+                    task_tracker.reset_region_events()
+                last_engine_step = engine_step
 
     finally:
         source.close()

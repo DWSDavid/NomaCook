@@ -1,4 +1,4 @@
-"""Live tomato-to-fridge demo: camera → perception → state engine → bilingual overlay → session recording.
+"""Live tomato-to-fridge demo: camera -> perception -> state engine -> bilingual overlay -> session recording.
 
 Usage:
   --source 0              built-in webcam (default)
@@ -9,6 +9,10 @@ Usage:
   --stop-on-complete      auto-exit 2s after task finishes
   --no-display            headless mode (for batch testing)
   --max-frames N          stop after N frames (smoke test)
+  --qwen-realtime         enable Qwen realtime voice interaction
+  --qwen-model MODEL      override model (default: qwen3.5-omni-flash-realtime)
+  --qwen-voice VOICE      override voice (default: Tina)
+  --qwen-url URL          override WebSocket URL
 
 Reads perception config from domain_packs/kitchen/tomato_to_fridge.yaml.
 """
@@ -16,10 +20,12 @@ Reads perception config from domain_packs/kitchen/tomato_to_fridge.yaml.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import csv
 import json
 import math
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +44,7 @@ from perception.tomato_to_fridge_events import (
 )
 from server.domain.config import DomainConfig
 from server.engine import StateEngine, load_recipe
+from server.engine.hot_memory import HotMemory
 from server.engine.snapshot import build_task_snapshot
 from server.events import create_event
 from server.live.frame_source import open_source
@@ -103,6 +110,12 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--fridge-roi", type=_parse_roi, default=None)
     ap.add_argument("--no-display", action="store_true")
     ap.add_argument("--max-frames", type=int, default=0)
+    ap.add_argument("--qwen-realtime", action="store_true",
+                    help="enable Qwen realtime voice interaction")
+    ap.add_argument("--qwen-model", default="qwen3.5-omni-flash-realtime",
+                    help="Qwen model (default: qwen3.5-omni-flash-realtime)")
+    ap.add_argument("--qwen-voice", default="Tina", help="Qwen voice (default: Tina)")
+    ap.add_argument("--qwen-url", default=None, help="override Qwen WebSocket URL")
     return ap
 
 
@@ -120,6 +133,24 @@ def run(args: argparse.Namespace) -> None:
     detect_every = args.detect_every or cfg.detect_every
     table_frac = args.table_fraction if args.table_fraction is not None else cfg.table_fraction
     stability = args.stability or cfg.stability_frames
+
+    hot = HotMemory()
+
+    # ── qwen env check ──
+    if args.qwen_realtime:
+        from server.voice.qwen_realtime import QwenRealtimeAdapter
+        try:
+            qwen = QwenRealtimeAdapter(
+                model=args.qwen_model,
+                voice=args.qwen_voice,
+                url_override=args.qwen_url,
+                hot_memory=hot,
+            )
+        except RuntimeError as exc:
+            print(f"[qwen] {exc}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        qwen = None
 
     detector = ObjectDetector(device=device, conf=conf)
     detector.set_vocab(cfg.vocab)
@@ -156,6 +187,11 @@ def run(args: argparse.Namespace) -> None:
         session_dir.mkdir(parents=True, exist_ok=True)
     else:
         session_dir = None
+
+    # ── qwen with session dir ──
+    if qwen is not None and session_dir:
+        qwen._session_dir = session_dir
+        (session_dir / "realtime_events.jsonl").touch()
 
     events_path = session_dir / "events.jsonl" if session_dir else None
     snaps_path = session_dir / "snapshots.jsonl" if session_dir else None
@@ -206,11 +242,38 @@ def run(args: argparse.Namespace) -> None:
             with snaps_path.open("a", encoding="utf-8") as f:
                 f.write(snap.model_dump_json() + "\n")
 
+        # ── hot memory ──
+        recent_event = {"type": envelope.type, "seq": envelope.seq, "confidence": envelope.confidence}
+        transition_info = None
+        if result.transition is not None:
+            transition_info = {
+                "from_step": result.transition.completed_step_id,
+                "to_step": result.transition.next_step_id,
+                "score": result.transition.score,
+                "decision_id": result.transition.decision_id,
+            }
+        hot.update(
+            snapshot=build_task_snapshot(engine.context, engine.current_step),
+            recent_events=[recent_event],
+            latest_transition=transition_info,
+        )
+        if session_dir:
+            hot.write_latest_snapshot(session_dir)
+
     print(f"source={args.source}  device={device}  detect_every={detect_every}")
     print(f"fridge_fb={fridge_fallback}")
     print(f"session={'on' if session_dir else 'off'}  video={'on' if writer else 'off'}  "
           f"stop_on_complete={'on' if args.stop_on_complete else 'off'}")
     print(f"Recipe: {recipe.dish} ({len(recipe.steps)} steps)")
+
+    # ── start Qwen background thread ──
+    qwen_thread: threading.Thread | None = None
+    if qwen is not None:
+        print(f"qwen-realtime: model={args.qwen_model} voice={args.qwen_voice}")
+        def _qwen_runner():
+            asyncio.run(qwen.run())
+        qwen_thread = threading.Thread(target=_qwen_runner, daemon=True, name="qwen-realtime")
+        qwen_thread.start()
 
     try:
         for pts_ms, frame in source.frames():
@@ -218,7 +281,7 @@ def run(args: argparse.Namespace) -> None:
             inference_ran = frame_idx % detect_every == 0
 
             yolo_ms = 0.0
-            raw_dets = detector.detect(frame) if inference_ran else []
+            raw_dets = []
             if inference_ran:
                 t_yolo = time.monotonic()
                 raw_dets = detector.detect(frame)
@@ -269,6 +332,7 @@ def run(args: argparse.Namespace) -> None:
                     "step_id": cur_step, "first_frame": frame_idx, "pts_ms": round(pts_ms, 2),
                 })
                 last_step_id = cur_step
+                task_tracker.reset_region_events()
 
             # ── observations ──
             if obs_path:
@@ -301,11 +365,12 @@ def run(args: argparse.Namespace) -> None:
                         round(total_ms, 2),
                     ])
 
+            ctx = engine.context
+            step = engine.current_step
+
             # ── bilingual overlay ──
             if writer is not None or not args.no_display:
                 hh, ww = frame.shape[:2]
-                ctx = engine.context
-                step = engine.current_step
                 progress = ctx.step_progress
                 thr = step.completion_policy.threshold
                 score_pct = min(progress.score / max(thr, 1e-6), 1.0)
@@ -384,6 +449,9 @@ def run(args: argparse.Namespace) -> None:
         exit_reason = f"error: {exc}"
         print(f"  ! error: {exc}", file=sys.stderr)
     finally:
+        # ── stop Qwen ──
+        if qwen is not None:
+            qwen.request_stop()
         source.close()
         hand_tracker.close()
         if writer is not None:
@@ -424,6 +492,18 @@ def run(args: argparse.Namespace) -> None:
         "exit_reason": exit_reason,
         "annotated_video": str(session_dir / "annotated_live.mp4") if writer else None,
     }
+
+    if qwen is not None:
+        qs = qwen.stats()
+        summary["qwen_enabled"] = True
+        summary["qwen_connected"] = qwen.connected
+        summary["qwen_model"] = args.qwen_model
+        summary["qwen_voice"] = args.qwen_voice
+        summary["qwen_user_turn_count"] = qs["user_turn_count"]
+        summary["qwen_assistant_turn_count"] = qs["assistant_turn_count"]
+        summary["qwen_first_audio_mean_ms"] = round(qs["qwen_first_audio_mean_ms"], 2)
+        summary["qwen_first_audio_p95_ms"] = round(qs["qwen_first_audio_p95_ms"], 2)
+        summary["qwen_error_count"] = qs["qwen_error_count"]
 
     if summary_path:
         json.dump(summary, summary_path.open("w"), indent=2)
