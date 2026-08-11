@@ -4,9 +4,11 @@ shutdown, first-audio latency, and API key safety."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -219,63 +221,121 @@ def test_bounded_reconnect_max_2_attempts():
     assert a.connected is False
 
 
-# ── User interruption: response.cancel on speech_started ──
+# ── Production interruption: response.cancel via real _connect_and_run ──
+
+class _FakeMicStream:
+    def start(self): pass
+    def stop(self): pass
+    def close(self): pass
+
+class _FakeSpkStream:
+    def start(self): pass
+    def stop(self): pass
+    def close(self): pass
+
+class _FakeWS:
+    """Async context manager with controlled server-event iterator and send capture."""
+    def __init__(self, server_events: list[str]):
+        self._events = server_events
+        self._idx = 0
+        self.sent: list[str] = []
+        self.closed = False
+
+    async def __aenter__(self): return self
+    async def __aexit__(self, *a): pass
+
+    def __aiter__(self): return self
+
+    async def __anext__(self):
+        if self._idx >= len(self._events):
+            raise StopAsyncIteration
+        raw = self._events[self._idx]
+        self._idx += 1
+        return raw
+
+    async def send(self, data: str):
+        self.sent.append(data)
+
+    async def close(self):
+        self.closed = True
+
 
 def test_interruption_sends_response_cancel():
-    """Fake WebSocket: response_in_progress + speech_started → response.cancel sent."""
+    """Production _connect_and_run: response.created then speech_started → cancel sent."""
     import server.voice.qwen_realtime as qr
-
-    sent = []
-
-    class FakeWS:
-        async def __aenter__(self): return self
-        async def __aexit__(self, *a): pass
-        async def send(self, data): sent.append(data)
 
     server_events = [
         '{"type": "response.created"}',
         '{"type": "input_audio_buffer.speech_started"}',
     ]
+    fake_ws = _FakeWS(server_events)
 
-    async def fake_connect_and_run(self):
-        import contextlib
-        self._connected = True
-        response_in_progress = False
-        ws = FakeWS()
-
-        async def noop(): pass
-        mic_task = asyncio.create_task(noop())
-        spk_task = asyncio.create_task(noop())
-        ctx_task = asyncio.create_task(noop())
-
-        try:
-            for raw in server_events:
-                msg = json.loads(raw)
-                etype = msg["type"]
-                if etype == "response.created":
-                    response_in_progress = True
-                elif etype == "input_audio_buffer.speech_started":
-                    if response_in_progress:
-                        await ws.send('{"type": "response.cancel"}')
-                        response_in_progress = False
-        finally:
-            self._connected = False
-            for t in (ctx_task, mic_task, spk_task):
-                t.cancel()
-            for t in (ctx_task, mic_task, spk_task):
-                with contextlib.suppress(asyncio.CancelledError):
-                    await t
+    def fake_connect(url, **kw):
+        return fake_ws
 
     with patch.dict(os.environ, _ENV, clear=True):
-        with patch.object(qr.QwenRealtimeAdapter, "_connect_and_run", fake_connect_and_run):
-            hm = HotMemory()
-            hm.update(snapshot=_make_snap())
-            a = _make_adapter(hm)
-            asyncio.run(a.run())
+        with patch.object(qr.websockets, 'connect', fake_connect):
+            with patch.object(qr.sd, 'RawInputStream', return_value=_FakeMicStream()):
+                with patch.object(qr.sd, 'RawOutputStream', return_value=_FakeSpkStream()):
+                    hm = HotMemory()
+                    hm.update(snapshot=_make_snap())
+                    a = _make_adapter(hm)
+                    asyncio.run(a.run())
 
-    cancel_msgs = [m for m in sent if '"response.cancel"' in m]
-    assert len(cancel_msgs) == 1
-    assert len(sent) == 1  # no retries; adapter gets clean exit after first run returns
+    # speech_started fires, response.cancel sent
+    assert a._user_turns == 1
+    cancel = [m for m in fake_ws.sent if '"response.cancel"' in m]
+    assert len(cancel) == 1
+    # session.update (context) was sent at least once
+    session_updates = [m for m in fake_ws.sent if '"session.update"' in m]
+    assert len(session_updates) >= 1
+
+
+def test_shutdown_clean_exit():
+    """Production run: WebSocket stays open until stop requested → clean exit."""
+    import server.voice.qwen_realtime as qr
+
+    done = asyncio.Event()
+
+    class BlockingFakeWS:
+        """Yields one event then blocks until done is set, then raises StopAsyncIteration."""
+        def __init__(self):
+            self.sent: list[str] = []
+            self.closed = False
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        def __aiter__(self): return self
+        async def __anext__(self):
+            if done.is_set():
+                raise StopAsyncIteration
+            await asyncio.sleep(0.05)
+            return '{"type": "session.updated"}'
+        async def send(self, data: str): self.sent.append(data)
+        async def close(self): self.closed = True
+
+    fake_ws = BlockingFakeWS()
+
+    def fake_connect(url, **kw):
+        return fake_ws
+
+    with patch.dict(os.environ, _ENV, clear=True):
+        with patch.object(qr.websockets, 'connect', fake_connect):
+            with patch.object(qr.sd, 'RawInputStream', return_value=_FakeMicStream()):
+                with patch.object(qr.sd, 'RawOutputStream', return_value=_FakeSpkStream()):
+                    hm = HotMemory()
+                    hm.update(snapshot=_make_snap())
+                    a = _make_adapter(hm)
+
+                    async def _run_and_stop():
+                        loop = asyncio.get_running_loop()
+                        loop.call_later(0.2, a.request_stop)
+                        loop.call_later(0.3, done.set)
+                        await a.run()
+
+                    asyncio.run(_run_and_stop())
+
+    assert a.connected is False
+    assert fake_ws.closed is True
 
 
 # ── HotMemory write_latest_snapshot ──

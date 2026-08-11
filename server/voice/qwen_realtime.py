@@ -132,8 +132,8 @@ class QwenRealtimeAdapter:
         return {
             "user_turn_count": self._user_turns,
             "assistant_turn_count": self._assistant_turns,
-            "qwen_first_audio_mean_ms": sum(lats) / len(lats) if lats else 0,
-            "qwen_first_audio_p95_ms": self._p95(lats),
+            "qwen_first_audio_mean_ms": round(sum(lats) / len(lats), 2) if lats else None,
+            "qwen_first_audio_p95_ms": round(self._p95(lats), 2) if lats else None,
             "qwen_error_count": self._error_count,
         }
 
@@ -262,7 +262,7 @@ class QwenRealtimeAdapter:
 
     async def _connect_and_run(self) -> None:
         headers = {"Authorization": f"Bearer {self._api_key}"}
-        async with websockets.connect(self._ws_url, additional_headers=headers) as ws:
+        async with websockets.connect(self._ws_url, additional_headers=headers, close_timeout=2) as ws:
             self._connected = True
             self._log({"type": "connected"})
             print(f"[qwen] connected to {self._model}")

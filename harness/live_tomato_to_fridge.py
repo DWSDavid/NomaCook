@@ -507,8 +507,12 @@ def run(args: argparse.Namespace) -> None:
         summary["qwen_voice"] = args.qwen_voice
         summary["qwen_user_turn_count"] = qs["user_turn_count"]
         summary["qwen_assistant_turn_count"] = qs["assistant_turn_count"]
-        summary["qwen_first_audio_mean_ms"] = round(qs["qwen_first_audio_mean_ms"], 2)
-        summary["qwen_first_audio_p95_ms"] = round(qs["qwen_first_audio_p95_ms"], 2)
+        summary["qwen_first_audio_mean_ms"] = (
+            round(qs["qwen_first_audio_mean_ms"], 2) if qs["qwen_first_audio_mean_ms"] is not None else None
+        )
+        summary["qwen_first_audio_p95_ms"] = (
+            round(qs["qwen_first_audio_p95_ms"], 2) if qs["qwen_first_audio_p95_ms"] is not None else None
+        )
         summary["qwen_error_count"] = qs["qwen_error_count"]
 
     if summary_path:
