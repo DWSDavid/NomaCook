@@ -73,7 +73,7 @@ class DomainConfig:
     def vocab_for_step(self, step_id: str) -> list[str]:
         """YOLO vocabulary for a step: step objects + always-on anchors."""
         objects = self.step_objects.get(step_id, [])
-        anchors = ["hand"]
+        anchors = ["hand", "refrigerator"]
         # expand aliases to prompts
         terms: list[str] = []
         seen: set[str] = set()
