@@ -143,7 +143,7 @@ class TomatoToFridgeTracker:
 
     @property
     def fridge_region(self) -> Box:
-        return self._fridge_box or (0, 0, 0, 0)
+        return self._fridge_box or self._fridge_fallback
 
     def update(
         self,
@@ -234,7 +234,6 @@ class TomatoToFridgeTracker:
         in_fridge_now = (
             tomato_pos is not None
             and self._fridge_box is not None
-            and self._tomato_missing_after_fridge
             and _point_in_box(tomato_pos, fridge_box)
         )
 
@@ -254,7 +253,7 @@ class TomatoToFridgeTracker:
         else:
             self._stable_table_counter = max(0, self._stable_table_counter - 1)
 
-        if in_fridge_now and self._in_fridge and self._release_observed:
+        if in_fridge_now and self._in_fridge:
             self._stable_fridge_counter += 1
             if self._stable_fridge_counter >= self._stability:
                 self._in_fridge = True
@@ -365,7 +364,9 @@ class TomatoToFridgeTracker:
                 self._holding_active = False
 
         # ── DESTINATION_INTERACTION ──
-        if self._holding_active and tomato_pos is not None:
+        # hand enters fridge region while tomato is still visible (user may
+        # have temporarily put tomato down to open the fridge door).
+        if tomato_pos is not None:
             hand_near_fridge = False
             for _, palm, _, _ in hands:
                 if _point_in_box(palm, fridge_box):
@@ -416,6 +417,7 @@ class TomatoToFridgeTracker:
             )):
                 self._seen_events.discard(k)
         self._fridge_announced = False
+        self._in_fridge = False
         self._table_exit_counter = 0
         self._fridge_entry_counter = 0
         self._fridge_exit_counter = 0

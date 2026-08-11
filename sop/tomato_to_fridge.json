@@ -278,13 +278,7 @@
         ]
       },
       "next_step_id": "tomato_released_inside",
-      "recovery_transitions": [
-        {
-          "event_type": "HOLDING_STARTED",
-          "payload_matches": {"object": "tomato"},
-          "target_step_id": "tomato_held"
-        }
-      ]
+      "recovery_transitions": []
     },
     {
       "id": "tomato_released_inside",

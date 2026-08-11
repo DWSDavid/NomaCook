@@ -248,22 +248,21 @@ def test_destination_interaction_fires_per_inference_frame() -> None:
     assert len(dest_events) >= 2
 
 
-def test_single_frame_no_destination_without_holding() -> None:
-    """A single inference frame with hand near fridge but no holding
-    must NOT produce DESTINATION_INTERACTION."""
+def test_no_destination_interaction_without_hand_in_fridge() -> None:
+    """Palm outside fridge region + tomato visible = no DESTINATION_INTERACTION."""
     tracker = TomatoToFridgeTracker(
         frame_width=640, frame_height=480, stability_frames=2,
     )
     det = ("tomato", 0.9, (200, 370, 260, 430))
     fridge = ("refrigerator", 0.6, (100, 100, 300, 250))
-    palm = (200.0, 200.0)
+    palm_outside = (450.0, 400.0)
 
     for _ in range(3):
         tracker.update(t_ms=100, detections=[det, fridge], hands=[],
                        interaction_events=[])
     all_events = tracker.update(
         t_ms=200, detections=[det, fridge],
-        hands=[("Right", palm, (180, 180, 220, 220), False)],
+        hands=[("Right", palm_outside, (440, 390, 460, 410), False)],
         interaction_events=[],
     )
     dest_events = [e for e in all_events if e.event_type == "DESTINATION_INTERACTION"]
