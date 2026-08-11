@@ -321,6 +321,12 @@ class QwenRealtimeAdapter:
             spk_task = asyncio.create_task(spk_player(), name="qwen-spk")
             ctx_task = asyncio.create_task(ctx_pusher(), name="qwen-ctx")
 
+            async def shutdown_watcher():
+                await self._stop.wait()
+                await ws.close()
+
+            sw_task = asyncio.create_task(shutdown_watcher(), name="qwen-shutdown")
+
             turn_end_at: float | None = None
             response_in_progress: bool = False
 
@@ -385,9 +391,10 @@ class QwenRealtimeAdapter:
 
             finally:
                 self._connected = False
-                for t in (ctx_task, mic_task, spk_task):
+                sw_task.cancel()
+                for t in (ctx_task, mic_task, spk_task, sw_task):
                     t.cancel()
-                for t in (ctx_task, mic_task, spk_task):
+                for t in (ctx_task, mic_task, spk_task, sw_task):
                     with contextlib.suppress(asyncio.CancelledError):
                         await t
                 mic_stream.stop()

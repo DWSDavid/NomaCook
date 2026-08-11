@@ -463,7 +463,7 @@ def run(args: argparse.Namespace) -> None:
 
     # ── wait for Qwen thread ──
     if qwen_thread is not None:
-        qwen_thread.join(timeout=3.0)
+        qwen_thread.join(timeout=5.0)
         print(f"qwen thread joined (alive={qwen_thread.is_alive()})")
 
     ended_at = time.monotonic()
