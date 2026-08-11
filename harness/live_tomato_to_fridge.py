@@ -274,6 +274,7 @@ def run(args: argparse.Namespace) -> None:
             asyncio.run(qwen.run())
         qwen_thread = threading.Thread(target=_qwen_runner, daemon=True, name="qwen-realtime")
         qwen_thread.start()
+        # ponytail: daemon=True so OS releases mic/speaker on process exit if join times out
 
     try:
         for pts_ms, frame in source.frames():
@@ -449,7 +450,7 @@ def run(args: argparse.Namespace) -> None:
         exit_reason = f"error: {exc}"
         print(f"  ! error: {exc}", file=sys.stderr)
     finally:
-        # ── stop Qwen ──
+        # ── stop Qwen and wait for thread ──
         if qwen is not None:
             qwen.request_stop()
         source.close()
@@ -459,6 +460,11 @@ def run(args: argparse.Namespace) -> None:
             print(f"annotated_live.mp4: {writer.frames_written} frames")
         if not args.no_display:
             cv2.destroyAllWindows()
+
+    # ── wait for Qwen thread ──
+    if qwen_thread is not None:
+        qwen_thread.join(timeout=3.0)
+        print(f"qwen thread joined (alive={qwen_thread.is_alive()})")
 
     ended_at = time.monotonic()
     ctx = engine.context

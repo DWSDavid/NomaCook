@@ -1,9 +1,9 @@
 """Qwen3.5 Omni Realtime adapter via native WebSocket.
 
-Connects to Aliyun Model Studio Realtime API, streams microphone audio,
-plays model audio responses, and reads HotMemory for task context injection.
-
-Protocol: https://help.aliyun.com/en/model-studio/realtime
+Context injection: session.update with merged instructions.
+Interruption: response.cancel via official client event.
+Reconnect: bounded (initial + 1 retry).
+Shutdown: loop.call_soon_threadsafe + bounded thread join.
 """
 
 from __future__ import annotations
@@ -26,9 +26,19 @@ from websockets.exceptions import ConnectionClosed
 INPUT_SAMPLE_RATE = 16000
 OUTPUT_SAMPLE_RATE = 24000
 CHUNK_MS = 100
-INPUT_CHUNK = int(INPUT_SAMPLE_RATE * CHUNK_MS / 1000)  # 1600 samples
+INPUT_CHUNK = int(INPUT_SAMPLE_RATE * CHUNK_MS / 1000)
+MAX_CONNECT_ATTEMPTS = 2
 RECONNECT_BACKOFF = 2.0
-MAX_RECONNECT_BACKOFF = 30.0
+
+QWEN_SYSTEM_INSTRUCTION = """你是 NomaCook 的实时任务助手。
+任务真相只来自 Noma StateEngine 提供的 current_task_state。
+不要根据猜测宣布步骤完成。
+不要自行修改当前步骤。
+优先用简短自然的中文回应，每次 1–2 句话。
+如果状态为 ON_TRACK，提供简短鼓励或下一步。
+如果状态为 UNCERTAIN，只说明缺少什么证据或询问一个问题。
+如果状态为 COMPLETE，明确告诉用户任务完成。
+不要持续说话，不要每个视觉事件都播报。"""
 
 
 @dataclass
@@ -69,17 +79,6 @@ def _build_url(model: str, url_override: str | None = None) -> str:
     return f"wss://{ws_id}.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime?model={model}"
 
 
-QWEN_SYSTEM_INSTRUCTION = """你是 NomaCook 的实时任务助手。
-任务真相只来自 Noma StateEngine 提供的 current_task_state。
-不要根据猜测宣布步骤完成。
-不要自行修改当前步骤。
-优先用简短自然的中文回应，每次 1–2 句话。
-如果状态为 ON_TRACK，提供简短鼓励或下一步。
-如果状态为 UNCERTAIN，只说明缺少什么证据或询问一个问题。
-如果状态为 COMPLETE，明确告诉用户任务完成。
-不要持续说话，不要每个视觉事件都播报。"""
-
-
 def _clear_q(q: asyncio.Queue) -> None:
     with contextlib.suppress(asyncio.QueueEmpty):
         while True:
@@ -111,13 +110,14 @@ class QwenRealtimeAdapter:
         self._user_turns = 0
         self._assistant_turns = 0
         self._first_audio_lats: list[float] = []
-        self._last_context_version: int = 0
+        self._last_sig: tuple | None = None
 
         self._event_log = RealtimeEventLog()
         if session_dir:
             (session_dir / "realtime_events.jsonl").touch()
 
-    # ── public read-only ──
+        # for shutdown
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     @property
     def connected(self) -> bool:
@@ -145,49 +145,80 @@ class QwenRealtimeAdapter:
         return s[int((len(s) - 1) * 0.95)]
 
     def request_stop(self) -> None:
-        self._stop.set()
-
-    # ── logging ──
+        if self._loop is not None and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._stop.set)
+        else:
+            self._stop.set()
 
     def _log(self, entry: dict[str, Any]) -> None:
+        entry.setdefault("timestamp", time.time())
+        if self._hot is not None:
+            mem = self._hot.read()
+            snap = mem.get("snapshot")
+            if snap:
+                entry["context_version"] = snap.get("context_version", 0)
+                entry["current_state"] = snap.get("state", "unknown")
         self._event_log.append(entry)
         if self._session_dir:
             self._event_log.flush_to(self._session_dir / "realtime_events.jsonl")
 
-    # ── context refresh ──
+    # ── context signature (only meaningful changes trigger update) ──
 
-    def _check_context_refresh(self) -> str | None:
+    def _context_signature(self) -> tuple | None:
         if self._hot is None:
             return None
-        memory = self._hot.read()
-        cv = memory.get("context_version", 0)
-        if cv == self._last_context_version:
-            return None
-        self._last_context_version = cv
-        snap = memory.get("snapshot")
+        mem = self._hot.read()
+        snap = mem.get("snapshot")
         if snap is None:
             return None
-        status = snap.get("status", "ON_TRACK")
-        if status in ("UNCERTAIN", "DEVIATING", "COMPLETE"):
-            return self._hot.compact_context()
-        if memory.get("pending_question"):
-            return self._hot.compact_context()
-        if memory.get("latest_transition"):
-            return self._hot.compact_context()
-        return None
+        trans = mem.get("latest_transition")
+        return (
+            snap.get("state"),
+            snap.get("status"),
+            snap.get("pending_question"),
+            trans.get("decision_id") if trans else None,
+        )
 
-    # ── mic callback ──
+    def _context_needs_refresh(self) -> bool:
+        sig = self._context_signature()
+        if sig is None:
+            return False
+        if self._last_sig is None:
+            self._last_sig = sig
+            return True
+        if sig != self._last_sig:
+            self._last_sig = sig
+            return True
+        return False
+
+    def _build_instructions(self) -> str:
+        base = QWEN_SYSTEM_INSTRUCTION
+        if self._hot is None:
+            return base
+        ctx = self._hot.compact_context()
+        return f"{base}\n\n[TASK_STATE]\n{ctx}"
+
+    # ── mic callback (thread-safe enqueue, no QueueFull crash) ──
 
     def _mic_callback(self, queue: asyncio.Queue[bytes]):
         loop = asyncio.get_event_loop()
 
         def callback(indata, frames, time_info, status):
             if status:
-                self._log({"type": "mic_status", "status": str(status), "timestamp": time.time()})
-            try:
-                loop.call_soon_threadsafe(queue.put_nowait, bytes(indata))
-            except asyncio.QueueFull:
-                pass
+                self._log({"type": "mic_status", "status": str(status)})
+
+            async def _enqueue():
+                try:
+                    queue.put_nowait(bytes(indata))
+                except asyncio.QueueFull:
+                    # ponytail: drop oldest to make room
+                    try:
+                        queue.get_nowait()
+                        queue.put_nowait(bytes(indata))
+                    except (asyncio.QueueEmpty, asyncio.QueueFull):
+                        pass
+
+            loop.call_soon_threadsafe(lambda: asyncio.ensure_future(_enqueue()))
 
         return callback
 
@@ -195,38 +226,45 @@ class QwenRealtimeAdapter:
 
     async def run(self) -> None:
         self._stop.clear()
-        backoff = RECONNECT_BACKOFF
-        while not self._stop.is_set():
+        self._loop = asyncio.get_running_loop()
+        attempt = 0
+
+        while attempt < MAX_CONNECT_ATTEMPTS and not self._stop.is_set():
+            attempt += 1
             try:
                 await self._connect_and_run()
-                break
+                return
             except (ConnectionClosed, OSError, asyncio.TimeoutError) as exc:
                 self._connected = False
                 self._error_count += 1
-                self._log({"type": "disconnected", "error": str(exc), "timestamp": time.time()})
+                self._log({"type": "disconnected", "error": str(exc)})
                 if self._stop.is_set():
-                    break
-                print(f"[qwen] disconnected, reconnecting in {backoff:.1f}s: {exc}")
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, MAX_RECONNECT_BACKOFF)
+                    return
+                if attempt < MAX_CONNECT_ATTEMPTS:
+                    print(f"[qwen] disconnected (attempt {attempt}/{MAX_CONNECT_ATTEMPTS}), reconnecting in {RECONNECT_BACKOFF:.1f}s: {exc}")
+                    await asyncio.sleep(RECONNECT_BACKOFF)
+                else:
+                    print(f"[qwen] disconnected (attempt {attempt}/{MAX_CONNECT_ATTEMPTS}), giving up: {exc}")
+                    return
             except Exception as exc:
                 self._connected = False
                 self._error_count += 1
-                self._log({"type": "error", "error_type": type(exc).__name__,
-                           "error": str(exc), "timestamp": time.time()})
+                self._log({"type": "error", "error_type": type(exc).__name__, "error": str(exc)})
                 if self._stop.is_set():
-                    break
-                print(f"[qwen] error, reconnecting in {backoff:.1f}s: {exc}")
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, MAX_RECONNECT_BACKOFF)
+                    return
+                if attempt < MAX_CONNECT_ATTEMPTS:
+                    print(f"[qwen] error (attempt {attempt}/{MAX_CONNECT_ATTEMPTS}), reconnecting in {RECONNECT_BACKOFF:.1f}s: {exc}")
+                    await asyncio.sleep(RECONNECT_BACKOFF)
+                else:
+                    print(f"[qwen] error (attempt {attempt}/{MAX_CONNECT_ATTEMPTS}), giving up: {exc}")
+                    return
         self._connected = False
 
     async def _connect_and_run(self) -> None:
         headers = {"Authorization": f"Bearer {self._api_key}"}
         async with websockets.connect(self._ws_url, additional_headers=headers) as ws:
             self._connected = True
-            self._log({"type": "connected", "model": self._model,
-                       "voice": self._voice, "timestamp": time.time()})
+            self._log({"type": "connected"})
             print(f"[qwen] connected to {self._model}")
 
             await self._send_session_update(ws)
@@ -268,24 +306,23 @@ class QwenRealtimeAdapter:
 
             async def ctx_pusher():
                 while not self._stop.is_set() and self._connected:
-                    ctx = self._check_context_refresh()
-                    if ctx:
+                    if self._context_needs_refresh():
+                        inst = self._build_instructions()
                         await ws.send(json.dumps({
-                            "type": "conversation.item.create",
-                            "item": {
-                                "type": "message",
-                                "role": "user",
-                                "content": [{"type": "input_text", "text": f"[TASK_STATE]\n{ctx}"}],
+                            "type": "session.update",
+                            "session": {
+                                "instructions": inst,
                             },
                         }))
-                        await asyncio.sleep(0.5)
+                        self._log({"type": "context_refreshed"})
                     await asyncio.sleep(1.0)
 
             mic_task = asyncio.create_task(mic_sender(), name="qwen-mic")
             spk_task = asyncio.create_task(spk_player(), name="qwen-spk")
             ctx_task = asyncio.create_task(ctx_pusher(), name="qwen-ctx")
 
-            response_start: float | None = None
+            turn_end_at: float | None = None
+            response_in_progress: bool = False
 
             try:
                 async for raw in ws:
@@ -294,12 +331,20 @@ class QwenRealtimeAdapter:
 
                     if etype == "input_audio_buffer.speech_started":
                         self._user_turns += 1
-                        self._log({"type": "speech_started", "timestamp": time.time()})
+                        self._log({"type": "speech_started"})
                         _clear_q(spk_queue)
-                        response_start = time.monotonic()
+                        if response_in_progress:
+                            await ws.send(json.dumps({"type": "response.cancel"}))
+                            self._log({"type": "response_cancelled"})
+                            response_in_progress = False
 
                     elif etype == "input_audio_buffer.speech_stopped":
-                        self._log({"type": "speech_stopped", "timestamp": time.time()})
+                        self._log({"type": "speech_stopped"})
+                        turn_end_at = time.monotonic()
+
+                    elif etype == "response.created":
+                        response_in_progress = True
+                        self._log({"type": "response_start"})
 
                     elif etype == "conversation.item.input_audio_transcription.completed":
                         self._log({"type": "user_transcript", "transcript": msg.get("transcript", "")})
@@ -313,10 +358,10 @@ class QwenRealtimeAdapter:
                     elif etype == "response.audio.delta":
                         audio_b64 = msg.get("delta", "")
                         if audio_b64:
-                            if response_start is not None:
-                                lat = (time.monotonic() - response_start) * 1000
+                            if turn_end_at is not None:
+                                lat = (time.monotonic() - turn_end_at) * 1000
                                 self._first_audio_lats.append(lat)
-                                response_start = None
+                                turn_end_at = None
                             await spk_queue.put(base64.b64decode(audio_b64))
 
                     elif etype == "conversation.item.input_audio_transcription.delta":
@@ -326,7 +371,8 @@ class QwenRealtimeAdapter:
                             print(f"\r[user] {text}{stash}", end="", flush=True)
 
                     elif etype == "response.done":
-                        self._log({"type": "response_end", "timestamp": time.time()})
+                        response_in_progress = False
+                        self._log({"type": "response_end"})
 
                     elif etype == "error":
                         self._error_count += 1
@@ -350,6 +396,7 @@ class QwenRealtimeAdapter:
                 spk_stream.close()
 
     async def _send_session_update(self, ws) -> None:
+        inst = self._build_instructions()
         await ws.send(json.dumps({
             "type": "session.update",
             "session": {
@@ -357,7 +404,7 @@ class QwenRealtimeAdapter:
                 "voice": self._voice,
                 "input_audio_format": "pcm",
                 "output_audio_format": "pcm",
-                "instructions": QWEN_SYSTEM_INSTRUCTION,
+                "instructions": inst,
                 "turn_detection": {
                     "type": "semantic_vad",
                     "threshold": 0.5,
@@ -365,3 +412,4 @@ class QwenRealtimeAdapter:
                 },
             },
         }))
+        self._last_sig = self._context_signature()

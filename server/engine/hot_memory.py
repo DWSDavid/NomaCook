@@ -13,7 +13,6 @@ from typing import Any
 
 from server.engine.snapshot import TaskSnapshot
 
-
 MAX_RECENT_EVENTS = 12
 
 
@@ -41,7 +40,8 @@ class HotMemory:
                 self._last_event_seq = snapshot.last_event_seq
                 self._pending_question = snapshot.pending_question
             if recent_events is not None:
-                self._recent_events = recent_events[-MAX_RECENT_EVENTS:]
+                self._recent_events.extend(recent_events)
+                self._recent_events = self._recent_events[-MAX_RECENT_EVENTS:]
             if latest_transition is not None:
                 self._latest_transition = latest_transition
 
