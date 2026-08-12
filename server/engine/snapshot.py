@@ -15,7 +15,10 @@ class TaskSnapshot(BaseModel):
 
     session_id: str
     task_id: str
+    task_goal: str = ""
     state: str
+    step_title: str = ""
+    step_instruction: str = ""
     status: Literal["ON_TRACK", "UNCERTAIN", "DEVIATING", "CRITICAL", "COMPLETE"]
     belief: float = Field(ge=0.0, le=1.0)
     active_objects: tuple[str, ...]
@@ -25,7 +28,7 @@ class TaskSnapshot(BaseModel):
     context_version: int
 
 
-def build_task_snapshot(context: SessionContext, step: RecipeStep) -> TaskSnapshot:
+def build_task_snapshot(context: SessionContext, step: RecipeStep, task_goal: str = "") -> TaskSnapshot:
     matched = set(context.step_progress.matched_rule_ids)
     missing = [
         rule.id for rule in step.completion_policy.evidence_rules if rule.id not in matched
@@ -57,7 +60,10 @@ def build_task_snapshot(context: SessionContext, step: RecipeStep) -> TaskSnapsh
     return TaskSnapshot(
         session_id=context.session_id,
         task_id=context.recipe_version_id,
+        task_goal=task_goal or context.recipe_version_id,
         state=context.current_step_id,
+        step_title=step.title,
+        step_instruction=step.instruction,
         status=status,
         belief=context.step_progress.score,
         active_objects=context.active_objects,

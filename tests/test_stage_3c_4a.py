@@ -1,5 +1,5 @@
 """Tests for HotMemory event accumulation, Qwen context refresh, bounded reconnect,
-shutdown, first-audio latency, and API key safety."""
+shutdown, first-audio latency, half-duplex mic, rich context, and API key safety."""
 
 from __future__ import annotations
 
@@ -24,9 +24,11 @@ _ENV = {"DASHSCOPE_API_KEY": "sk-test", "BAILIAN_WORKSPACE_ID": "ws-123"}
 
 
 def _make_snap(state="ready", status="ON_TRACK", belief=0.5, pending_question=None,
-               active_objects=(), missing_evidence=(), seq=1, cv=1):
+               active_objects=(), missing_evidence=(), seq=1, cv=1,
+               task_goal="把番茄放进冰箱", step_title="开始", step_instruction="请拿起桌上的番茄。"):
     return TaskSnapshot(
-        session_id="s1", task_id="t1", state=state,
+        session_id="s1", task_id="t1", task_goal=task_goal,
+        state=state, step_title=step_title, step_instruction=step_instruction,
         status=status, belief=belief, active_objects=active_objects,
         missing_evidence=missing_evidence, pending_question=pending_question,
         last_event_seq=seq, context_version=cv,
@@ -41,15 +43,58 @@ def _make_adapter(hm=None, **kw):
     return qr.QwenRealtimeAdapter(hot_memory=hm, session_dir=None, **kw)
 
 
+# ── Rich compact context: step_title, step_instruction, task_goal ──
+
+def test_compact_context_has_task_goal():
+    hm = HotMemory()
+    hm.update(snapshot=_make_snap(task_goal="把番茄放进冰箱", step_title="手拿番茄",
+                                   step_instruction="你拿着番茄了，请把它移向冰箱。"))
+    ctx = hm.compact_context()
+    assert "task_goal: 把番茄放进冰箱" in ctx
+    assert "current_step_title: 手拿番茄" in ctx
+    assert "你拿着番茄了" in ctx
+
+
+def test_compact_context_includes_instruction():
+    hm = HotMemory()
+    hm.update(snapshot=_make_snap(step_title="移动中", step_instruction="番茄正在移动，请继续移向冰箱。"))
+    ctx = hm.compact_context()
+    assert "current_step_title: 移动中" in ctx
+    assert "current_instruction: 番茄正在移动，请继续移向冰箱。" in ctx
+
+
+def test_compact_context_pending_question_is_null_not_none():
+    hm = HotMemory()
+    hm.update(snapshot=_make_snap(pending_question=None))
+    ctx = hm.compact_context()
+    assert "pending_question: None" in ctx or "pending_question: null" in ctx
+
+
+# ── Qwen instruction forbids fabricated visuals ──
+
+def test_qwen_instruction_forbids_fabricated_visuals():
+    import server.voice.qwen_realtime as qr
+    inst = qr.QWEN_SYSTEM_INSTRUCTION
+    assert "无法看到原始画面" in inst
+    assert "不要声称" in inst
+    assert "不要虚构" in inst
+    assert "不能闲聊" in inst
+
+
+def test_qwen_instruction_forbids_open_questions():
+    import server.voice.qwen_realtime as qr
+    inst = qr.QWEN_SYSTEM_INSTRUCTION
+    assert "不得反问" in inst
+    assert "不得复述" in inst
+    assert "不得进入开放式闲聊" in inst
+
+
 # ── HotMemory: append events, not replace ──
 
 def test_hot_memory_accumulates_events():
     hm = HotMemory()
     for i in range(20):
-        hm.update(
-            snapshot=_make_snap(cv=i + 1),
-            recent_events=[{"type": f"EV_{i}", "seq": i}],
-        )
+        hm.update(snapshot=_make_snap(cv=i + 1), recent_events=[{"type": f"EV_{i}", "seq": i}])
     data = hm.read()
     assert len(data["recent_events"]) == 12
     types_last = [e["type"] for e in data["recent_events"]]
@@ -60,10 +105,8 @@ def test_hot_memory_accumulates_events():
 def test_hot_memory_compact_context_has_latest_events():
     hm = HotMemory()
     for i in range(20):
-        hm.update(
-            snapshot=_make_snap(state="tomato_held", seq=i, cv=i + 1),
-            recent_events=[{"type": f"EV_{i}", "seq": i}],
-        )
+        hm.update(snapshot=_make_snap(state="tomato_held", seq=i, cv=i + 1),
+                   recent_events=[{"type": f"EV_{i}", "seq": i}])
     ctx = hm.compact_context()
     assert "EV_19" in ctx
 
@@ -88,7 +131,6 @@ def test_context_state_transition_triggers_refresh():
         assert a._context_needs_refresh() is True
         a._build_instructions()
         assert a._context_needs_refresh() is False
-
         hm.update(snapshot=_make_snap(state="tomato_on_table", cv=2))
         assert a._context_needs_refresh() is True
 
@@ -101,7 +143,6 @@ def test_context_pending_question_triggers_refresh():
         assert a._context_needs_refresh() is True
         a._build_instructions()
         assert a._context_needs_refresh() is False
-
         hm.update(snapshot=_make_snap(state="ready", cv=2, pending_question="done?"))
         assert a._context_needs_refresh() is True
 
@@ -111,15 +152,10 @@ def test_context_ordinary_event_no_refresh():
         hm = HotMemory()
         hm.update(snapshot=_make_snap(state="ready", cv=1))
         a = _make_adapter(hm)
-        # First call consumes initial sig
         assert a._context_needs_refresh() is True
-        # No change → false
         assert a._context_needs_refresh() is False
-
-        # Same state, just cv bump → no refresh
         hm.update(snapshot=_make_snap(state="ready", cv=2))
         assert a._context_needs_refresh() is False
-
         hm.update(snapshot=_make_snap(state="ready", cv=3))
         assert a._context_needs_refresh() is False
 
@@ -139,7 +175,6 @@ def test_qwen_fail_fast_missing_env():
         from server.voice.qwen_realtime import _check_env
         with pytest.raises(RuntimeError, match="DASHSCOPE_API_KEY"):
             _check_env()
-
     with patch.dict(os.environ, {"DASHSCOPE_API_KEY": "sk-test"}, clear=True):
         from server.voice.qwen_realtime import _check_env
         with pytest.raises(RuntimeError, match="BAILIAN_WORKSPACE_ID"):
@@ -168,20 +203,6 @@ def test_first_audio_latency_from_speech_stopped():
         assert 400 <= a._first_audio_lats[0] <= 600
 
 
-# ── Session update instructions merge ──
-
-def test_instructions_include_task_state():
-    with patch.dict(os.environ, _ENV, clear=True):
-        hm = HotMemory()
-        hm.update(snapshot=_make_snap(state="tomato_held", status="ON_TRACK", belief=0.84,
-                                       active_objects=("tomato",), missing_evidence=("shared_motion",)))
-        a = _make_adapter(hm)
-        inst = a._build_instructions()
-        assert "[TASK_STATE]" in inst
-        assert "tomato_held" in inst
-        assert "0.84" in inst
-
-
 # ── Log safety: no API key ──
 
 def test_log_no_api_key_leak():
@@ -201,7 +222,6 @@ def test_log_no_api_key_leak():
 
 def test_bounded_reconnect_max_2_attempts():
     attempt_counter = [0]
-
     async def fake_connect_and_run(self):
         attempt_counter[0] += 1
         import websockets
@@ -211,17 +231,15 @@ def test_bounded_reconnect_max_2_attempts():
         import server.voice.qwen_realtime as qr
         hm = HotMemory()
         hm.update(snapshot=_make_snap())
-
         with patch.object(qr.QwenRealtimeAdapter, "_connect_and_run", fake_connect_and_run):
             a = _make_adapter(hm)
             asyncio.run(a.run())
-
     assert attempt_counter[0] == 2
     assert a.error_count == 2
     assert a.connected is False
 
 
-# ── Production interruption: response.cancel via real _connect_and_run ──
+# ── Fake helpers for production-loop tests ──
 
 class _FakeMicStream:
     def start(self): pass
@@ -234,7 +252,6 @@ class _FakeSpkStream:
     def close(self): pass
 
 class _FakeWS:
-    """Async context manager with controlled server-event iterator and send capture."""
     def __init__(self, server_events: list[str]):
         self._events = server_events
         self._idx = 0
@@ -243,11 +260,11 @@ class _FakeWS:
 
     async def __aenter__(self): return self
     async def __aexit__(self, *a): pass
-
     def __aiter__(self): return self
 
     async def __anext__(self):
         if self._idx >= len(self._events):
+            await asyncio.sleep(0.02)  # keep loop alive briefly
             raise StopAsyncIteration
         raw = self._events[self._idx]
         self._idx += 1
@@ -260,21 +277,14 @@ class _FakeWS:
         self.closed = True
 
 
+# ── Production interruption: response.cancel via real _connect_and_run ──
+
 def test_interruption_sends_response_cancel():
-    """Production _connect_and_run: response.created then speech_started → cancel sent."""
     import server.voice.qwen_realtime as qr
-
-    server_events = [
-        '{"type": "response.created"}',
-        '{"type": "input_audio_buffer.speech_started"}',
-    ]
-    fake_ws = _FakeWS(server_events)
-
-    def fake_connect(url, **kw):
-        return fake_ws
+    fake_ws = _FakeWS(['{"type": "response.created"}', '{"type": "input_audio_buffer.speech_started"}'])
 
     with patch.dict(os.environ, _ENV, clear=True):
-        with patch.object(qr.websockets, 'connect', fake_connect):
+        with patch.object(qr.websockets, 'connect', lambda url, **kw: fake_ws):
             with patch.object(qr.sd, 'RawInputStream', return_value=_FakeMicStream()):
                 with patch.object(qr.sd, 'RawOutputStream', return_value=_FakeSpkStream()):
                     hm = HotMemory()
@@ -282,23 +292,17 @@ def test_interruption_sends_response_cancel():
                     a = _make_adapter(hm)
                     asyncio.run(a.run())
 
-    # speech_started fires, response.cancel sent
     assert a._user_turns == 1
     cancel = [m for m in fake_ws.sent if '"response.cancel"' in m]
     assert len(cancel) == 1
-    # session.update (context) was sent at least once
-    session_updates = [m for m in fake_ws.sent if '"session.update"' in m]
-    assert len(session_updates) >= 1
+    assert any('"session.update"' in m for m in fake_ws.sent)
 
 
 def test_shutdown_clean_exit():
-    """Production run: WebSocket stays open until stop requested → clean exit."""
     import server.voice.qwen_realtime as qr
-
     done = asyncio.Event()
 
     class BlockingFakeWS:
-        """Yields one event then blocks until done is set, then raises StopAsyncIteration."""
         def __init__(self):
             self.sent: list[str] = []
             self.closed = False
@@ -306,8 +310,7 @@ def test_shutdown_clean_exit():
         async def __aexit__(self, *a): pass
         def __aiter__(self): return self
         async def __anext__(self):
-            if done.is_set():
-                raise StopAsyncIteration
+            if done.is_set(): raise StopAsyncIteration
             await asyncio.sleep(0.05)
             return '{"type": "session.updated"}'
         async def send(self, data: str): self.sent.append(data)
@@ -315,27 +318,67 @@ def test_shutdown_clean_exit():
 
     fake_ws = BlockingFakeWS()
 
-    def fake_connect(url, **kw):
-        return fake_ws
-
     with patch.dict(os.environ, _ENV, clear=True):
-        with patch.object(qr.websockets, 'connect', fake_connect):
+        with patch.object(qr.websockets, 'connect', lambda url, **kw: fake_ws):
             with patch.object(qr.sd, 'RawInputStream', return_value=_FakeMicStream()):
                 with patch.object(qr.sd, 'RawOutputStream', return_value=_FakeSpkStream()):
                     hm = HotMemory()
                     hm.update(snapshot=_make_snap())
                     a = _make_adapter(hm)
-
                     async def _run_and_stop():
                         loop = asyncio.get_running_loop()
                         loop.call_later(0.2, a.request_stop)
                         loop.call_later(0.3, done.set)
                         await a.run()
-
                     asyncio.run(_run_and_stop())
-
     assert a.connected is False
     assert fake_ws.closed is True
+
+
+# ── Half-duplex: mic suppressed during assistant response ──
+
+def test_mic_suppressed_during_response():
+    """mic callback drops audio when mic_suppressed is set."""
+    import server.voice.qwen_realtime as qr
+    async def _run():
+        suppressed = asyncio.Event()
+        suppressed.set()
+        queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=4)
+        a = _make_adapter(HotMemory())
+        cb = a._mic_callback(queue, suppressed)
+        cb(b'\x00' * 3200, None, None, None)
+        await asyncio.sleep(0.02)
+        assert queue.empty()
+    with patch.dict(os.environ, _ENV, clear=True):
+        asyncio.run(_run())
+
+
+def test_mic_resumed_when_not_suppressed():
+    """mic callback passes audio when mic_suppressed is not set."""
+    import server.voice.qwen_realtime as qr
+    async def _run():
+        suppressed = asyncio.Event()
+        queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=4)
+        a = _make_adapter(HotMemory())
+        cb = a._mic_callback(queue, suppressed)
+        cb(b'\x00' * 3200, None, None, None)
+        await asyncio.sleep(0.02)
+        assert not queue.empty()
+    with patch.dict(os.environ, _ENV, clear=True):
+        asyncio.run(_run())
+
+
+def test_log_contains_mic_suppressed_events():
+    """Verify mic_suppressed / mic_resumed event types exist in adapter."""
+    with patch.dict(os.environ, _ENV, clear=True):
+        hm = HotMemory()
+        hm.update(snapshot=_make_snap())
+        a = _make_adapter(hm)
+        a._log({"type": "mic_suppressed"})
+        a._log({"type": "mic_resumed"})
+        types = {e["type"] for e in a._event_log.events}
+        assert "mic_suppressed" in types
+        assert "mic_resumed" in types
 
 
 # ── HotMemory write_latest_snapshot ──

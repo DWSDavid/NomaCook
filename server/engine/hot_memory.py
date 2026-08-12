@@ -66,19 +66,22 @@ class HotMemory:
         with self._lock:
             snap = self._snapshot
             if snap is None:
-                return "current_state: unknown\nstatus: ON_TRACK\nbelief: 0.00\nno recent events"
+                return ("task_goal: unknown\ncurrent_step_id: unknown\n"
+                        "current_step_title: unknown\ncurrent_instruction: unknown\n"
+                        "status: ON_TRACK\npending_question: null")
 
             lines = [
-                f"current_state: {snap.state}",
+                f"task_goal: {snap.task_goal}",
+                f"current_step_id: {snap.state}",
+                f"current_step_title: {snap.step_title}",
+                f"current_instruction: {snap.step_instruction}",
                 f"status: {snap.status}",
-                f"belief: {snap.belief:.2f}",
+                f"pending_question: {snap.pending_question}",
             ]
             if snap.active_objects:
                 lines.append(f"active_objects: {', '.join(snap.active_objects)}")
             if snap.missing_evidence:
                 lines.append(f"missing_evidence: {', '.join(snap.missing_evidence)}")
-            if snap.pending_question:
-                lines.append(f"pending_question: {snap.pending_question}")
 
             if self._recent_events:
                 recent_str = ", ".join(

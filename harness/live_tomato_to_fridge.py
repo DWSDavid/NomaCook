@@ -238,7 +238,7 @@ def run(args: argparse.Namespace) -> None:
             with events_path.open("a", encoding="utf-8") as f:
                 f.write(envelope.model_dump_json() + "\n")
         if snaps_path:
-            snap = build_task_snapshot(engine.context, engine.current_step)
+            snap = build_task_snapshot(engine.context, engine.current_step, recipe.dish)
             with snaps_path.open("a", encoding="utf-8") as f:
                 f.write(snap.model_dump_json() + "\n")
 
@@ -253,7 +253,7 @@ def run(args: argparse.Namespace) -> None:
                 "decision_id": result.transition.decision_id,
             }
         hot.update(
-            snapshot=build_task_snapshot(engine.context, engine.current_step),
+            snapshot=build_task_snapshot(engine.context, engine.current_step, recipe.dish),
             recent_events=[recent_event],
             latest_transition=transition_info,
         )
