@@ -79,11 +79,47 @@ Run capture validation, build review queues, and obtain at least one human Gold 
 - The six-session report is generated without changing live task state.
 - Focused tests and the full non-e2e suite pass.
 
+## Offline VLM SHADOW evaluation (approved 2026-08-13)
+
+The user approved a bounded offline VLM shadow evaluation. It is strictly an
+evaluation-side cross-check and never touches live task state.
+
+Boundaries:
+
+- Reuse the existing `GeminiVLMClient` and its existing `GEMINI_API_KEY`
+  configuration. No new provider.
+- Never feed VLM output into `StateEngine.consume()`.
+- Never call `ValidatedVLMResult.to_event()`, which emits a `runtime_mode=RUN`
+  envelope into the live event log.
+- VLM output lives in a separate `vlm_shadow_eval.json` file, never in
+  `events.jsonl`.
+- When no API credential is present, emit `status=skipped` and the deterministic
+  evaluator still succeeds.
+
+Trigger conditions (all four are gated, not a blanket scan):
+
+1. human label is `uncertain`
+2. review reason contains `evidence conflict`
+3. transient object or hand occlusion inside the key time window
+4. task completion or session-ending boundary
+
+For each triggered window, extract three representative frames (before, middle,
+after) from the raw video and compose one OpenCV contact sheet. The question is
+specific and must not leak the Gold Label, e.g.:
+
+- "Across these frames, is the person continuously holding the tomato?"
+- "Was the tomato released inside the refrigerator?"
+- "Is the tomato visibly present in the scene?"
+
+Each VLM record captures trigger reason, question, sampled timestamps, answer,
+confidence, Gold comparison eligibility, and agreement with Gold (null when no
+Gold exists).
+
 ## Explicit exclusions
 
-- VLM integration or VLM accuracy claims
 - model training or threshold tuning
 - Web UI
 - Redis, database, or network service
 - changes to StateEngine authority
+- VLM advancing task state or announcing completion
 - claims of production accuracy from this pilot-sized dataset

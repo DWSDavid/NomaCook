@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 
 from google import genai
@@ -146,3 +147,48 @@ class GeminiVLMClient:
         if not response.text:
             raise RuntimeError("Gemini VLM returned no structured text")
         return VLMObservation.model_validate_json(response.text)
+
+    def analyze_contact_sheet(
+        self,
+        question: str,
+        image_bytes: bytes,
+        *,
+        mime_type: str = "image/jpeg",
+    ) -> dict:
+        """Offline SHADOW cross-check: answer a specific yes/no question about a
+        contact sheet. Returns {"answer", "confidence"}. Never feeds StateEngine."""
+        if not image_bytes:
+            raise ValueError("image_bytes cannot be empty")
+        prompt = (
+            "你是离线影子评估器，仅根据这张拼接图回答一个具体问题。\n"
+            "只回答 yes 或 no，并给出 0-1 的置信度。不要补充解释。\n"
+            f"问题: {question}\n"
+            '以 JSON 返回: {"answer": "yes"|"no", "confidence": 0.0-1.0}'
+        )
+        response = self._client.models.generate_content(
+            model=self.model,
+            contents=[
+                prompt,
+                types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+            ],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "answer": types.Schema(
+                            type=types.Type.STRING, enum=["yes", "no"]
+                        ),
+                        "confidence": types.Schema(type=types.Type.NUMBER),
+                    },
+                    required=["answer", "confidence"],
+                ),
+            ),
+        )
+        if not response.text:
+            raise RuntimeError("Gemini VLM returned no shadow answer")
+        data = json.loads(response.text)
+        return {
+            "answer": data.get("answer"),
+            "confidence": float(data.get("confidence", 0.0)),
+        }
