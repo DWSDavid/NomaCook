@@ -42,6 +42,7 @@ from perception.tomato_to_fridge_events import (
     TomatoToFridgeTracker,
     canonicalize_detections,
 )
+from server.data.capture import build_frame_observation, build_session_manifest
 from server.domain.config import DomainConfig
 from server.engine import StateEngine, load_recipe
 from server.engine.hot_memory import HotMemory
@@ -103,6 +104,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="explicit session directory (auto-generated if not set)")
     ap.add_argument("--record-video", action="store_true",
                     help="save annotated_live.mp4")
+    ap.add_argument("--record-raw-video", action="store_true",
+                    help="save raw_video.mp4 (before overlay)")
     ap.add_argument("--stop-on-complete", action="store_true",
                     help="auto-exit after task completes (+ hold)")
     ap.add_argument("--completion-hold-seconds", type=float, default=2.0,
@@ -181,7 +184,7 @@ def run(args: argparse.Namespace) -> None:
         if session_dir.exists() and list(session_dir.glob("*")):
             raise FileExistsError(f"session dir exists and is non-empty: {session_dir}")
         session_dir.mkdir(parents=True, exist_ok=True)
-    elif args.save_session or args.record_video:
+    elif args.save_session or args.record_video or args.record_raw_video:
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
         session_dir = Path("data/sessions") / f"tomato_fridge_live_{ts}"
         session_dir.mkdir(parents=True, exist_ok=True)
@@ -206,6 +209,22 @@ def run(args: argparse.Namespace) -> None:
     writer = None
     if args.record_video and session_dir:
         writer = AnnotatedVideoWriter(session_dir / "annotated_live.mp4", fps, (w, h))
+
+    raw_writer = None
+    if args.record_raw_video:
+        if not session_dir:
+            print("--record-raw-video requires --save-session", file=sys.stderr)
+            sys.exit(1)
+        from cv2 import VideoWriter, VideoWriter_fourcc
+        raw_writer = VideoWriter(
+            str(session_dir / "raw_video.mp4"),
+            VideoWriter_fourcc(*"avc1"), fps, (w, h),
+        )
+        if not raw_writer.isOpened():
+            raw_writer = VideoWriter(
+                str(session_dir / "raw_video.mp4"),
+                VideoWriter_fourcc(*"mp4v"), fps, (w, h),
+            )
 
     seq = 0
     frame_idx = 0
@@ -337,23 +356,25 @@ def run(args: argparse.Namespace) -> None:
 
             # ── observations ──
             if obs_path:
+                obs = build_frame_observation(
+                    session_id=SESSION_ID,
+                    seq_no=seq,
+                    frame_idx=frame_idx,
+                    pts_ms=pts_ms,
+                    frame_width=w,
+                    frame_height=h,
+                    inference_ran=inference_ran,
+                    detected_objects=can_dets if inference_ran else [],
+                    hands=hands,
+                    current_step_id=cur_step,
+                    step_status=engine.context.step_status,
+                    context_version=engine.context.context_version,
+                    emitted_events=[
+                        {"type": t, "confidence": 1.0} for t in emitted_types
+                    ],
+                )
                 with obs_path.open("a", encoding="utf-8") as f:
-                    f.write(json.dumps({
-                        "frame_idx": frame_idx, "pts_ms": round(pts_ms, 2),
-                        "inference_ran": inference_ran,
-                        "current_step_id": cur_step,
-                        "raw_detections": [
-                            {"label": d.label, "conf": round(d.conf, 3), "box": _to_xyxy(d.box)}
-                            for d in raw_dets
-                        ],
-                        "canonical_detections": [
-                            {"label": d[0], "conf": round(d[1], 3), "box": d[2]}
-                            for d in can_dets
-                        ],
-                        "hand_count": len(hands),
-                        "hands_gripping": sum(1 for h in hands if h.is_gripping),
-                        "emitted_event_types": emitted_types,
-                    }, ensure_ascii=False) + "\n")
+                    f.write(json.dumps(obs, ensure_ascii=False) + "\n")
 
             total_ms = (time.monotonic() - t0) * 1000.0
             total_lats.append(total_ms)
@@ -365,6 +386,10 @@ def run(args: argparse.Namespace) -> None:
                         round(state_lats[-1], 2) if state_lats else 0,
                         round(total_ms, 2),
                     ])
+
+            # ── raw video (before any overlay) ──
+            if raw_writer is not None:
+                raw_writer.write(frame)
 
             ctx = engine.context
             step = engine.current_step
@@ -458,6 +483,9 @@ def run(args: argparse.Namespace) -> None:
         if writer is not None:
             writer.close()
             print(f"annotated_live.mp4: {writer.frames_written} frames")
+        if raw_writer is not None:
+            raw_writer.release()
+            print(f"raw_video.mp4: saved")
         if not args.no_display:
             cv2.destroyAllWindows()
 
@@ -517,6 +545,22 @@ def run(args: argparse.Namespace) -> None:
 
     if summary_path:
         json.dump(summary, summary_path.open("w"), indent=2)
+
+    # ── session manifest ──
+    if session_dir:
+        manifest = build_session_manifest(
+            session_id=SESSION_ID,
+            task_id=cfg.task_id,
+            source=args.source,
+            source_type="video" if not args.source.isdigit() else "camera",
+            frame_width=w, frame_height=h,
+            fps=fps, detect_every=detect_every,
+            started_at=started_at, ended_at=ended_at,
+            session_dir=session_dir,
+            raw_video=args.record_raw_video,
+            annotated_video=args.record_video,
+        )
+        json.dump(manifest, (session_dir / "session_manifest.json").open("w"), indent=2)
 
     print(f"\ndone. frames={frame_idx}  events={total_events}  exit={exit_reason}")
     print(f"  final step: {ctx.current_step_id}  status: {ctx.step_status}  score: {ctx.step_progress.score:.2f}")
