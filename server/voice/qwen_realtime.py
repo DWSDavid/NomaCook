@@ -362,6 +362,8 @@ class QwenRealtimeAdapter:
             pending_audio: list[bytes] = []
             pending_transcript: str | None = None
             current_user_transcript: str | None = None
+            turn_snapshot: dict[str, Any] | None = None
+            turn_plan: dict[str, Any] | None = None
 
             try:
                 async for raw in ws:
@@ -386,6 +388,8 @@ class QwenRealtimeAdapter:
                     elif etype == "input_audio_buffer.speech_stopped":
                         self._log({"type": "speech_stopped"})
                         turn_end_at = time.monotonic()
+                        # freeze snapshot at question time
+                        turn_snapshot = _snapshot_dict(self._hot)
 
                     elif etype == "response.created":
                         response_in_progress = True
@@ -401,6 +405,14 @@ class QwenRealtimeAdapter:
                         current_user_transcript = transcript
                         self._log({"type": "user_transcript", "transcript": transcript})
                         print(f"\n[user] {transcript}")
+                        # generate grounded response plan from frozen snapshot
+                        if turn_snapshot is not None:
+                            dialogue = self._hot.read().get("recent_dialogue", []) if self._hot else []
+                            turn_plan = grounded_plan(
+                                snapshot=turn_snapshot,
+                                user_transcript=transcript,
+                                recent_dialogue=dialogue,
+                            )
 
                     elif etype == "response.audio_transcript.done":
                         transcript = msg.get("transcript", "")
@@ -426,33 +438,66 @@ class QwenRealtimeAdapter:
                         response_in_progress = False
                         self._log({"type": "response_end"})
 
-                        # ── fact gate ──
-                        snap = _snapshot_dict(self._hot)
+                        # ── fact gate: use frozen snapshot, not latest ──
+                        candidate_transcript = pending_transcript or ""
+                        plan = turn_plan or {}
+                        snap_for_gate = turn_snapshot
+
                         allowed, override_text = check_fact_gate(
-                            assistant_transcript=pending_transcript or "",
-                            snapshot=snap,
+                            assistant_transcript=candidate_transcript,
+                            snapshot=snap_for_gate,
                         )
+
+                        delivered_text: str
+                        delivery_source: str
 
                         if allowed:
                             for chunk in pending_audio:
                                 await spk_queue.put(chunk)
+                            delivered_text = candidate_transcript
+                            delivery_source = "qwen"
                             self._log({"type": "fact_gate", "allowed": True})
+                            self._log({"type": "delivered_response", "source": "qwen",
+                                        "text": delivered_text})
                         else:
+                            pending_audio.clear()
+                            delivered_text = override_text or "还没有确认。"
+                            delivery_source = "grounded_override"
                             self._log({"type": "fact_gate", "allowed": False,
-                                        "blocked_transcript": pending_transcript,
-                                        "override_text": override_text})
+                                        "candidate_transcript": candidate_transcript,
+                                        "delivered_text": delivered_text})
+                            self._log({"type": "delivered_response", "source": "grounded_override",
+                                        "text": delivered_text})
+                            print(f"[noma] {delivered_text}")
+                            # play override via local TTS if available
+                            try:
+                                import subprocess, shutil
+                                if shutil.which("say"):
+                                    await asyncio.to_thread(
+                                        subprocess.run, ["say", delivered_text],
+                                        capture_output=True, timeout=5,
+                                    )
+                            except Exception:
+                                pass
 
                         # ── dialogue memory ──
-                        if current_user_transcript and pending_transcript:
+                        if current_user_transcript and candidate_transcript:
                             if self._hot is not None:
                                 self._hot.add_dialogue_turn(
                                     user_transcript=current_user_transcript,
-                                    assistant_transcript=override_text if not allowed else pending_transcript,
+                                    candidate_assistant_transcript=candidate_transcript,
+                                    delivered_assistant_transcript=delivered_text,
+                                    delivery_source=delivery_source,
                                     response_was_grounded=allowed,
+                                    state_at_question=(
+                                        snap_for_gate.get("state") if snap_for_gate else None
+                                    ),
                                     session_dir=self._session_dir,
                                 )
 
                         current_user_transcript = None
+                        turn_snapshot = None
+                        turn_plan = None
                         pending_audio.clear()
                         pending_transcript = None
 

@@ -51,16 +51,22 @@ class HotMemory:
         self,
         *,
         user_transcript: str,
-        assistant_transcript: str,
+        candidate_assistant_transcript: str,
+        delivered_assistant_transcript: str,
+        delivery_source: str,
         response_was_grounded: bool,
+        state_at_question: str | None = None,
         session_dir: Path | None = None,
     ) -> None:
         with self._lock:
-            state = self._snapshot.state if self._snapshot else "unknown"
+            state_now = self._snapshot.state if self._snapshot else "unknown"
             turn = {
                 "user": user_transcript,
-                "assistant": assistant_transcript,
-                "state_at_turn": state,
+                "candidate_assistant": candidate_assistant_transcript,
+                "delivered_assistant": delivered_assistant_transcript,
+                "delivery_source": delivery_source,
+                "state_at_question": state_at_question or "unknown",
+                "state_at_delivery": state_now,
                 "timestamp": __import__("time").time(),
                 "response_was_grounded": response_was_grounded,
             }
@@ -113,7 +119,8 @@ class HotMemory:
                 lines.append("recent_dialogue:")
                 for d in self._recent_dialogue[-3:]:
                     lines.append(f"  user: {d['user']}")
-                    lines.append(f"  assistant: {d['assistant']}")
+                    lines.append(f"  assistant: {d['delivered_assistant']}")
+                    lines.append(f"  grounded: {d['response_was_grounded']}")
 
             if self._recent_events:
                 recent_str = ", ".join(
