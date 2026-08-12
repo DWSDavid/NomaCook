@@ -7,14 +7,20 @@ Usage:
 from __future__ import annotations
 
 import json
-import os
 import sys
-import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from server.data.review import apply_review, _read_jsonl
+from server.data.review import apply_review, build_label_metrics, _read_jsonl
+
+
+def _write_jsonl_atomic(path: Path, rows: list[dict]) -> None:
+    tmp = path.with_suffix(".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    tmp.replace(path)
 
 
 def main() -> None:
@@ -86,7 +92,8 @@ def main() -> None:
             continue
         elif choice == "c":
             new_gl = apply_review(gl, reviewer_label="correct",
-                                   event_type=event_type or None, step_after=step or None)
+                                   event_type=event_type or reason.upper(),
+                                   step_after=step or None)
         elif choice == "i":
             new_et = input("  Correct event_type (blank for none): ").strip() or None
             new_step = input("  Correct step_after (blank for none): ").strip() or None
@@ -101,19 +108,26 @@ def main() -> None:
         label_map[rid] = new_gl
         # atomic write
         all_labels = list(label_map.values())
-        tmp = labels_path.with_suffix(".tmp")
-        with tmp.open("w", encoding="utf-8") as f:
-            for g in all_labels:
-                f.write(json.dumps(g, ensure_ascii=False) + "\n")
-        tmp.replace(labels_path)
+        _write_jsonl_atomic(labels_path, all_labels)
+        item["review_status"] = "reviewed"
+        _write_jsonl_atomic(queue_path, queue)
         reviewed_count = sum(1 for g in all_labels if g.get("reviewer_label") is not None)
         print(f"  Saved. Reviewed: {reviewed_count}/{total}")
 
     # final summary
     final_labels = _read_jsonl(labels_path) if labels_path.exists() else []
+    reviewed = [g for g in final_labels if g.get("reviewer_label") is not None]
     golds = [g for g in final_labels if g.get("is_ground_truth")]
     uncerts = [g for g in final_labels if g.get("reviewer_label") == "uncertain"]
-    print(f"\nDone. Reviewed: {len(final_labels)}  Gold: {len(golds)}  Uncertain: {len(uncerts)}")
+    summary_path = review_dir / "review_summary.json"
+    if summary_path.exists():
+        summary = json.loads(summary_path.read_text())
+        summary["gold_labels"] = len(golds)
+        summary["metrics"] = build_label_metrics(session_dir, review_dir)
+        tmp = summary_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(summary, indent=2, ensure_ascii=False))
+        tmp.replace(summary_path)
+    print(f"\nDone. Reviewed: {len(reviewed)}  Gold: {len(golds)}  Uncertain: {len(uncerts)}")
 
 
 if __name__ == "__main__":

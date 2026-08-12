@@ -29,6 +29,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import cv2
 import numpy as np
@@ -57,7 +58,6 @@ from server.pipeline.render import (
 )
 from server.pipeline.session import SESSION_EPOCH, event_id_for, t_server_for
 
-SESSION_ID = "ses_tomato_fridge_live"
 DOMAIN_PACK = Path(__file__).resolve().parent.parent / "domain_packs" / "kitchen" / "tomato_to_fridge.yaml"
 _FONT = cv2.FONT_HERSHEY_SIMPLEX
 
@@ -102,6 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="write events, snapshots, observations, latency, summary")
     ap.add_argument("--session-dir", default=None,
                     help="explicit session directory (auto-generated if not set)")
+    ap.add_argument("--session-id", default=None,
+                    help="explicit unique session ID (auto-generated if not set)")
     ap.add_argument("--record-video", action="store_true",
                     help="save annotated_live.mp4")
     ap.add_argument("--record-raw-video", action="store_true",
@@ -122,6 +124,10 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def resolve_session_id(args: argparse.Namespace) -> str:
+    return args.session_id or f"ses_tomato_fridge_{uuid4().hex}"
+
+
 def _to_xyxy(box):
     return (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
 
@@ -129,7 +135,8 @@ def _to_xyxy(box):
 def run(args: argparse.Namespace) -> None:
     cfg = DomainConfig.load(DOMAIN_PACK)
     recipe = load_recipe("sop/tomato_to_fridge.json")
-    engine = StateEngine(session_id=SESSION_ID, recipe=recipe, started_at=SESSION_EPOCH)
+    session_id = resolve_session_id(args)
+    engine = StateEngine(session_id=session_id, recipe=recipe, started_at=SESSION_EPOCH)
 
     device = args.device or cfg.detector_device
     conf = args.conf if args.conf is not None else cfg.detector_conf
@@ -335,12 +342,12 @@ def run(args: argparse.Namespace) -> None:
                 )
                 for tev in task_events:
                     emit(create_event(
-                        session_id=SESSION_ID, seq=seq,
+                        session_id=session_id, seq=seq,
                         event_type=tev.event_type, t_device_ms=pts_ms,
                         t_server_est=t_server_for(pts_ms),
                         received_at=t_server_for(pts_ms),
                         source="tomato_fridge_geometry_v1",
-                        event_id=event_id_for(SESSION_ID, seq),
+                        event_id=event_id_for(session_id, seq),
                         confidence=tev.confidence, payload=tev.payload,
                     ))
                     seq += 1
@@ -357,7 +364,7 @@ def run(args: argparse.Namespace) -> None:
             # ── observations ──
             if obs_path:
                 obs = build_frame_observation(
-                    session_id=SESSION_ID,
+                    session_id=session_id,
                     seq_no=seq,
                     frame_idx=frame_idx,
                     pts_ms=pts_ms,
@@ -506,7 +513,7 @@ def run(args: argparse.Namespace) -> None:
         return s[int(k)] if f == c else s[f] * (c - k) + s[c] * (k - f)
 
     summary = {
-        "session_id": SESSION_ID, "source": args.source,
+        "session_id": session_id, "source": args.source,
         "task_id": cfg.task_id, "started_at": started_at, "ended_at": ended_at,
         "total_frames": frame_idx, "total_events": total_events,
         "event_type_counts": event_counts,
@@ -549,7 +556,7 @@ def run(args: argparse.Namespace) -> None:
     # ── session manifest ──
     if session_dir:
         manifest = build_session_manifest(
-            session_id=SESSION_ID,
+            session_id=session_id,
             task_id=cfg.task_id,
             source=args.source,
             source_type="video" if not args.source.isdigit() else "camera",

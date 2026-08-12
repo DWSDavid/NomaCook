@@ -18,6 +18,11 @@ GOLD_SCHEMA = "noma.gold_label.v1"
 
 CLIP_PADDING_MS = 2000
 MERGE_OVERLAP_CENTER_MS = 3000  # merge if centers are this close (same reason)
+CONFLICTING_EVENT_PAIRS = (
+    frozenset(("HAND_NEAR_STARTED", "HAND_NEAR_ENDED")),
+    frozenset(("HOLDING_STARTED", "HOLDING_ENDED")),
+    frozenset(("OBJECT_ENTERED_REGION", "OBJECT_EXITED_REGION")),
+)
 
 
 def _stable_id(*parts: str) -> str:
@@ -96,7 +101,10 @@ def build_review_queue(
         })
 
     # 3. low-confidence evidence
-    low_conf_events = [e for e in events if (e.get("confidence") or 1.0) < 0.5]
+    low_conf_events = [
+        e for e in events
+        if e.get("confidence") is not None and e["confidence"] < 0.5
+    ]
     seen_conf_centers: set[int] = set()
     for ev in low_conf_events:
         pts_ms = ev.get("t_device_ms", 0)
@@ -116,7 +124,34 @@ def build_review_queue(
             "fps": fps,
         })
 
-    # 4. session ending without completion
+    # 4. directly opposing evidence emitted for the same frame
+    events_by_frame: dict[int, set[str]] = {}
+    for event in events:
+        frame = int(event.get("t_device_ms", 0) / ms_per_frame)
+        events_by_frame.setdefault(frame, set()).add(event.get("type", ""))
+    for frame, event_types in events_by_frame.items():
+        conflicts = sorted({
+            event_type
+            for pair in CONFLICTING_EVENT_PAIRS
+            if pair <= event_types
+            for event_type in pair
+        })
+        if not conflicts:
+            continue
+        center_ms = frame * ms_per_frame
+        start_f, end_f, start_ms, end_ms = _make_clip_range(center_ms)
+        items.append({
+            "reason": "conflict",
+            "event_type": "|".join(conflicts),
+            "confidence": None,
+            "center_frame": frame,
+            "center_pts_ms": center_ms,
+            "start_frame": start_f, "end_frame": end_f,
+            "start_pts_ms": start_ms, "end_pts_ms": end_ms,
+            "fps": fps,
+        })
+
+    # 5. session ending without completion
     if summary.get("step_status") != "completed":
         start_f = max(0, total_frames - int(2000 / ms_per_frame))
         end_f = total_frames - 1
@@ -131,26 +166,32 @@ def build_review_queue(
             "fps": fps,
         })
 
-    # 5. dedup and merge overlapping same-reason items by center proximity
+    # 6. dedup and merge overlapping same-reason items by center proximity
     items.sort(key=lambda x: x["center_frame"])
     merged: list[dict[str, Any]] = []
+    latest_by_label: dict[tuple[str, str, str], dict[str, Any]] = {}
     for item in items:
-        if merged and merged[-1]["reason"] == item["reason"]:
-            prev = merged[-1]
+        label_key = (
+            item["reason"],
+            item.get("event_type", ""),
+            item.get("step_id", ""),
+        )
+        prev = latest_by_label.get(label_key)
+        if prev is not None:
             center_dist = abs(item["center_pts_ms"] - prev["center_pts_ms"])
             if center_dist < MERGE_OVERLAP_CENTER_MS:
                 prev["end_frame"] = max(prev["end_frame"], item["end_frame"])
                 prev["end_pts_ms"] = max(prev["end_pts_ms"], item["end_pts_ms"])
-                prev["center_frame"] = prev["center_frame"]
                 continue
         merged.append(item)
+        latest_by_label[label_key] = item
 
-    # 6. produce final review items with stable IDs
+    # 7. produce final review items with stable IDs
     sid = summary.get("session_id", manifest.get("session_id", "unknown"))
     task_id = manifest.get("task_id", "unknown")
     review_items = []
-    for i, item in enumerate(merged):
-        rid = _stable_id(sid, item["reason"], str(item["start_frame"]), str(i))
+    for item in merged:
+        rid = _stable_id(sid, item["reason"], str(item["center_frame"]))
         review_items.append({
             "schema_version": REVIEW_SCHEMA,
             "review_item_id": rid,
@@ -202,12 +243,12 @@ def apply_review(
     reviewer_confidence: float | None = None,
     notes: str = "",
 ) -> dict[str, Any]:
-    import time
     gl = dict(gold_label)
     gl["reviewer_label"] = reviewer_label
     gl["event_type"] = event_type or gl.get("event_type")
     gl["step_after"] = step_after or gl.get("step_after")
-    gl["boundary_frame"] = boundary_frame or gl.get("boundary_frame")
+    if boundary_frame is not None:
+        gl["boundary_frame"] = boundary_frame
     gl["reviewer_confidence"] = reviewer_confidence
     gl["notes"] = notes
     gl["reviewed_at"] = __import__("datetime").datetime.now(
@@ -240,7 +281,7 @@ def validate_review_labels(
 
     result = {
         "queue_items": 0, "transition_items": 0, "low_confidence_items": 0,
-        "completion_items": 0, "session_ending_items": 0,
+        "completion_items": 0, "conflict_items": 0, "session_ending_items": 0,
         "reviewed": 0, "gold_labels": 0, "incorrect_machine_labels": 0,
         "uncertain": 0, "remaining": 0,
         "errors": [],
@@ -255,7 +296,20 @@ def validate_review_labels(
 
     queue = _read_jsonl(queue_path)
     labels = _read_jsonl(labels_path) if labels_path.exists() else []
-    label_map: dict[str, dict] = {g["review_item_id"]: g for g in labels}
+    label_map: dict[str, dict] = {}
+    for label in labels:
+        rid = label.get("review_item_id")
+        if not rid:
+            result["errors"].append("gold label missing review_item_id")
+            continue
+        if label.get("schema_version") != GOLD_SCHEMA:
+            result["errors"].append(f"bad gold schema: {rid}")
+        if label.get("reviewer_label") not in (None, "correct", "incorrect", "uncertain"):
+            result["errors"].append(f"invalid reviewer_label: {rid}")
+        if rid in label_map:
+            result["errors"].append(f"duplicate gold label: {rid}")
+        else:
+            label_map[rid] = label
 
     seen_ids: set[str] = set()
     for item in queue:
@@ -276,6 +330,8 @@ def validate_review_labels(
             result["completion_items"] += 1
         elif reason == "low_confidence":
             result["low_confidence_items"] += 1
+        elif reason == "conflict":
+            result["conflict_items"] += 1
         elif reason == "session_ending_incomplete":
             result["session_ending_items"] += 1
 
@@ -321,8 +377,9 @@ def validate_review_labels(
 
     # label ID validity
     for gl in labels:
-        if gl["review_item_id"] not in seen_ids:
-            result["errors"].append(f"orphan gold label: {gl['review_item_id']}")
+        rid = gl.get("review_item_id")
+        if rid and rid not in seen_ids:
+            result["errors"].append(f"orphan gold label: {rid}")
 
     # check secrets
     for path in (queue_path, labels_path):

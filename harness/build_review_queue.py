@@ -7,7 +7,6 @@ Usage:
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -15,7 +14,7 @@ import cv2
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from server.data.capture import SCHEMA_VERSION as CAPTURE_SCHEMA, secrets_check
+from server.data.capture import secrets_check
 
 import server.data.review as rv
 from server.data.review import build_gold_label_template, build_review_queue, build_label_metrics
@@ -96,17 +95,29 @@ def main() -> None:
                 clip_source = "raw_video" if vf == "raw_video.mp4" else "annotated_video"
                 break
 
-    # write queue
     queue_path = review_dir / "review_queue.jsonl"
+    labels_path = review_dir / "gold_labels.jsonl"
+    existing_labels = {
+        label["review_item_id"]: label
+        for label in rv._read_jsonl(labels_path)
+        if label.get("review_item_id")
+    }
+    for item in items:
+        label = existing_labels.get(item["review_item_id"])
+        if label and label.get("reviewer_label") is not None:
+            item["review_status"] = "reviewed"
+
+    # write queue
     with queue_path.open("w", encoding="utf-8") as f:
         for item in items:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
-    # write gold label templates
-    labels_path = review_dir / "gold_labels.jsonl"
+    # preserve completed reviews when regenerating deterministic queue items
     with labels_path.open("w", encoding="utf-8") as f:
         for item in items:
-            gl = build_gold_label_template(item)
+            gl = existing_labels.get(
+                item["review_item_id"], build_gold_label_template(item)
+            )
             f.write(json.dumps(gl, ensure_ascii=False) + "\n")
 
     # cut clips
@@ -158,6 +169,10 @@ def main() -> None:
     detector_coverage = round(frames_with_dets / max(total_frames, 1), 4) if total_frames else 0
     hand_coverage = round(frames_with_valid / max(total_frames, 1), 4) if total_frames else 0
 
+    summary_path = review_dir / "review_summary.json"
+    previous_summary = (
+        json.loads(summary_path.read_text()) if summary_path.exists() else {}
+    )
     summary = {
         "session_id": items[0]["session_id"] if items else "",
         "task_id": items[0]["task_id"] if items else "",
@@ -166,10 +181,11 @@ def main() -> None:
         "transition_items": sum(1 for i in items if i["reason"] == "state_transition"),
         "completion_items": sum(1 for i in items if i["reason"] == "task_completion"),
         "low_confidence_items": sum(1 for i in items if i["reason"] == "low_confidence"),
+        "conflict_items": sum(1 for i in items if i["reason"] == "conflict"),
         "session_ending_items": sum(1 for i in items if i["reason"] == "session_ending_incomplete"),
         "clips_generated": clip_count,
-        "gold_labels": 0,
-        "human_acceptance": "PENDING",
+        "gold_labels": metrics["gold_count"],
+        "human_acceptance": previous_summary.get("human_acceptance", "PENDING"),
         "capture_quality": {
             "total_frames": total_frames,
             "total_hand_detections": total_hand_dets,
@@ -182,7 +198,7 @@ def main() -> None:
         },
         "metrics": metrics,
     }
-    (review_dir / "review_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False))
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False))
 
     # validate
     v_passed, v_result = rv.validate_review_labels(session_dir, review_dir)
@@ -191,11 +207,12 @@ def main() -> None:
     print(f"  transitions: {summary['transition_items']}")
     print(f"  completions: {summary['completion_items']}")
     print(f"  low-confidence: {summary['low_confidence_items']}")
+    print(f"  conflicts: {summary['conflict_items']}")
     print(f"  session-ending: {summary['session_ending_items']}")
     print(f"Clips: {clip_count}/{len(items)}")
     print(f"Clip source: {clip_source}")
-    print(f"Gold labels: 0")
-    print(f"Human acceptance: PENDING")
+    print(f"Gold labels: {summary['gold_labels']}")
+    print(f"Human acceptance: {summary['human_acceptance']}")
     q = summary["capture_quality"]
     print(f"Capture quality:")
     print(f"  Total hand detections: {q['total_hand_detections']}")
