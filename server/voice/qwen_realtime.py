@@ -97,7 +97,7 @@ class QwenRealtimeAdapter:
     def __init__(
         self,
         *,
-        model: str = "qwen3.5-omni-flash-realtime",
+        model: str = "qwen3-omni-flash-realtime",
         voice: str = "Tina",
         url_override: str | None = None,
         hot_memory=None,

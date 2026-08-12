@@ -112,8 +112,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--max-frames", type=int, default=0)
     ap.add_argument("--qwen-realtime", action="store_true",
                     help="enable Qwen realtime voice interaction")
-    ap.add_argument("--qwen-model", default="qwen3.5-omni-flash-realtime",
-                    help="Qwen model (default: qwen3.5-omni-flash-realtime)")
+    ap.add_argument("--qwen-model", default="qwen3-omni-flash-realtime",
+                    help="Qwen model (default: qwen3-omni-flash-realtime)")
     ap.add_argument("--qwen-voice", default="Tina", help="Qwen voice (default: Tina)")
     ap.add_argument("--qwen-url", default=None, help="override Qwen WebSocket URL")
     return ap
