@@ -14,6 +14,7 @@ from typing import Any
 from server.engine.snapshot import TaskSnapshot
 
 MAX_RECENT_EVENTS = 12
+MAX_DIALOGUE_TURNS = 6
 
 
 class HotMemory:
@@ -25,6 +26,7 @@ class HotMemory:
         self._pending_question: str | None = None
         self._context_version: int = 0
         self._last_event_seq: int = -1
+        self._recent_dialogue: list[dict[str, Any]] = []
 
     def update(
         self,
@@ -45,6 +47,29 @@ class HotMemory:
             if latest_transition is not None:
                 self._latest_transition = latest_transition
 
+    def add_dialogue_turn(
+        self,
+        *,
+        user_transcript: str,
+        assistant_transcript: str,
+        response_was_grounded: bool,
+        session_dir: Path | None = None,
+    ) -> None:
+        with self._lock:
+            state = self._snapshot.state if self._snapshot else "unknown"
+            turn = {
+                "user": user_transcript,
+                "assistant": assistant_transcript,
+                "state_at_turn": state,
+                "timestamp": __import__("time").time(),
+                "response_was_grounded": response_was_grounded,
+            }
+            self._recent_dialogue.append(turn)
+            self._recent_dialogue = self._recent_dialogue[-MAX_DIALOGUE_TURNS:]
+        if session_dir:
+            with (session_dir / "dialogue_events.jsonl").open("a", encoding="utf-8") as f:
+                f.write(json.dumps(turn, ensure_ascii=False) + "\n")
+
     def read(self) -> dict[str, Any]:
         with self._lock:
             snap = self._snapshot
@@ -55,6 +80,7 @@ class HotMemory:
                 "pending_question": self._pending_question,
                 "context_version": self._context_version,
                 "last_event_seq": self._last_event_seq,
+                "recent_dialogue": list(self._recent_dialogue),
             }
 
     def snapshot(self) -> TaskSnapshot | None:
@@ -82,6 +108,12 @@ class HotMemory:
                 lines.append(f"active_objects: {', '.join(snap.active_objects)}")
             if snap.missing_evidence:
                 lines.append(f"missing_evidence: {', '.join(snap.missing_evidence)}")
+
+            if self._recent_dialogue:
+                lines.append("recent_dialogue:")
+                for d in self._recent_dialogue[-3:]:
+                    lines.append(f"  user: {d['user']}")
+                    lines.append(f"  assistant: {d['assistant']}")
 
             if self._recent_events:
                 recent_str = ", ".join(
