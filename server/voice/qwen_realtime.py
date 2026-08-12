@@ -92,20 +92,35 @@ def _clear_q(q: asyncio.Queue) -> None:
             q.get_nowait()
 
 
+def _resolve_model_defaults(model: str, voice_override: str | None = None) -> tuple[str, str]:
+    """Return (voice, vad_type) based on model family. CLI voice always wins."""
+    if model.startswith("qwen3.5"):
+        vad_type = "semantic_vad"
+        voice = "Tina"
+    else:
+        vad_type = "server_vad"
+        voice = "Cherry"
+    if voice_override is not None:
+        voice = voice_override
+    return voice, vad_type
+
+
 class QwenRealtimeAdapter:
 
     def __init__(
         self,
         *,
         model: str = "qwen3-omni-flash-realtime",
-        voice: str = "Tina",
+        voice: str | None = None,
         url_override: str | None = None,
         hot_memory=None,
         session_dir: Path | None = None,
     ):
         _check_env()
         self._model = model
-        self._voice = voice
+        resolved_voice, resolved_vad = _resolve_model_defaults(model, voice)
+        self._voice = resolved_voice
+        self._vad_type = resolved_vad
         self._ws_url = _build_url(model, url_override)
         self._api_key = os.environ["DASHSCOPE_API_KEY"]
         self._hot = hot_memory
@@ -267,7 +282,7 @@ class QwenRealtimeAdapter:
         async with websockets.connect(self._ws_url, additional_headers=headers, close_timeout=2) as ws:
             self._connected = True
             self._log({"type": "connected"})
-            print(f"[qwen] connected to {self._model}")
+            print(f"[qwen] connected to {self._model} (voice={self._voice}, vad={self._vad_type})")
 
             await self._send_session_update(ws)
 
@@ -438,7 +453,7 @@ class QwenRealtimeAdapter:
                 "output_audio_format": "pcm",
                 "instructions": self._build_instructions(),
                 "turn_detection": {
-                    "type": "semantic_vad",
+                    "type": self._vad_type,
                     "threshold": 0.5,
                     "silence_duration_ms": 800,
                 },

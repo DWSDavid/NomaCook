@@ -114,7 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="enable Qwen realtime voice interaction")
     ap.add_argument("--qwen-model", default="qwen3-omni-flash-realtime",
                     help="Qwen model (default: qwen3-omni-flash-realtime)")
-    ap.add_argument("--qwen-voice", default="Tina", help="Qwen voice (default: Tina)")
+    ap.add_argument("--qwen-voice", default=None, help="Qwen voice (default: model-aware, Tina for 3.5, Cherry for 3)")
     ap.add_argument("--qwen-url", default=None, help="override Qwen WebSocket URL")
     return ap
 

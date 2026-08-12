@@ -89,6 +89,54 @@ def test_qwen_instruction_forbids_open_questions():
     assert "不得进入开放式闲聊" in inst
 
 
+# ── Model-aware defaults: voice + VAD ──
+
+def test_model_defaults_qwen3():
+    from server.voice.qwen_realtime import _resolve_model_defaults
+    voice, vad = _resolve_model_defaults("qwen3-omni-flash-realtime")
+    assert voice == "Cherry"
+    assert vad == "server_vad"
+
+
+def test_model_defaults_qwen35():
+    from server.voice.qwen_realtime import _resolve_model_defaults
+    voice, vad = _resolve_model_defaults("qwen3.5-omni-flash-realtime")
+    assert voice == "Tina"
+    assert vad == "semantic_vad"
+
+
+def test_model_defaults_voice_override():
+    from server.voice.qwen_realtime import _resolve_model_defaults
+    voice, vad = _resolve_model_defaults("qwen3-omni-flash-realtime", voice_override="Stella")
+    assert voice == "Stella"
+    assert vad == "server_vad"
+
+
+def test_model_defaults_qwen35_voice_override():
+    from server.voice.qwen_realtime import _resolve_model_defaults
+    voice, vad = _resolve_model_defaults("qwen3.5-omni-plus-realtime", voice_override="Ethan")
+    assert voice == "Ethan"
+    assert vad == "semantic_vad"
+
+
+def test_qwen3_session_update_payload():
+    """Verify qwen3 adapter produces session.update with Cherry + server_vad."""
+    import server.voice.qwen_realtime as qr
+    with patch.dict(os.environ, _ENV, clear=True):
+        a = qr.QwenRealtimeAdapter(model="qwen3-omni-flash-realtime")
+        assert a._voice == "Cherry"
+        assert a._vad_type == "server_vad"
+
+
+def test_qwen35_session_update_payload():
+    """Verify qwen3.5 adapter produces session.update with Tina + semantic_vad."""
+    import server.voice.qwen_realtime as qr
+    with patch.dict(os.environ, _ENV, clear=True):
+        a = qr.QwenRealtimeAdapter(model="qwen3.5-omni-flash-realtime")
+        assert a._voice == "Tina"
+        assert a._vad_type == "semantic_vad"
+
+
 # ── HotMemory: append events, not replace ──
 
 def test_hot_memory_accumulates_events():
