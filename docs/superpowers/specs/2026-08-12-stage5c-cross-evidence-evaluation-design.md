@@ -86,13 +86,14 @@ evaluation-side cross-check and never touches live task state.
 
 Boundaries:
 
-- Reuse the existing `GeminiVLMClient` and its existing `GEMINI_API_KEY`
-  configuration. No new provider.
+- Use `QwenVLMClient` (stdlib HTTP against the Beijing compatible-mode
+  endpoint) with `DASHSCOPE_API_KEY` + `BAILIAN_WORKSPACE_ID`. Model defaults
+  to `QWEN_VLM_MODEL` or `qwen3.6-flash`. No fallback to Gemini.
 - Never feed VLM output into `StateEngine.consume()`.
 - Never call `ValidatedVLMResult.to_event()`, which emits a `runtime_mode=RUN`
   envelope into the live event log.
-- VLM output lives in a separate `vlm_shadow_eval.json` file, never in
-  `events.jsonl`.
+- VLM output lives in a separate `cross_evidence_qwen.json` file and per-call
+  contact-sheet JPEGs, never in `events.jsonl`.
 - When no API credential is present, emit `status=skipped` and the deterministic
   evaluator still succeeds.
 
@@ -111,9 +112,11 @@ specific and must not leak the Gold Label, e.g.:
 - "Was the tomato released inside the refrigerator?"
 - "Is the tomato visibly present in the scene?"
 
-Each VLM record captures trigger reason, question, sampled timestamps, answer,
-confidence, Gold comparison eligibility, and agreement with Gold (null when no
-Gold exists).
+Each VLM record captures provider, model, region, trigger reason, question,
+sampled timestamps, answer, confidence, latency, attempts, Gold comparison
+eligibility, agreement with Gold (null when no Gold exists), and a safe error
+category on failure. The exact contact-sheet bytes sent to the VLM are saved
+to disk for human audit.
 
 ## Explicit exclusions
 

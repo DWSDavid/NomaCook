@@ -241,8 +241,33 @@ VLM_TRIGGER_QUESTIONS = {
     "uncertain": "Across these frames, is the person continuously holding the tomato?",
     "conflict": "Across these frames, is the person continuously holding the tomato?",
     "completion": "Was the tomato released inside the refrigerator?",
-    "session_ending": "Is the tomato visibly present in the scene?",
+    "session_ending": (
+        "Was the task left incomplete because the tomato was not released inside "
+        "the refrigerator?"
+    ),
+    "occlusion": "Across the occlusion, is the person still continuously holding the tomato?",
 }
+
+
+def compute_agreement(
+    gold_label: dict[str, Any] | None,
+    answer: str | None,
+) -> bool | None:
+    """Compute VLM-vs-Gold agreement. Only is_ground_truth=true labels are comparable.
+
+    Gold `correct` means the machine claim holds (expected VLM answer "yes");
+    Gold `incorrect` means it does not (expected "no"). Returns None when the
+    label is absent, unreviewed, uncertain, or not ground truth.
+    """
+    if not gold_label or not gold_label.get("is_ground_truth"):
+        return None
+    reviewer = gold_label.get("reviewer_label")
+    if reviewer not in ("correct", "incorrect"):
+        return None
+    if answer not in ("yes", "no"):
+        return None
+    expected = "yes" if reviewer == "correct" else "no"
+    return answer == expected
 
 
 def detect_occlusion(
@@ -250,22 +275,35 @@ def detect_occlusion(
     start_pts_ms: float,
     end_pts_ms: float,
     label: str = "tomato",
+    max_gap_frames: int = 10,
 ) -> bool:
-    """Detect present → absent → present for a label within the window."""
-    seen_present = False
-    seen_absent_after_present = False
+    """Detect transient present → short-absent → present for a label.
+
+    Only a SHORT absence (<= max_gap_frames inference frames, ~1s) counts as
+    occlusion. A long absence is "object left the scene", not occlusion, and
+    must not trigger the shadow VLM.
+    """
+    seq: list[bool] = []
     for obs in observations:
         pts = obs.get("pts_ms", 0.0)
         if not _in_window(pts, start_pts_ms, end_pts_ms):
             continue
+        if obs.get("inference_ran") is False:
+            continue
         present = any(d.get("label") == label for d in obs.get("detections", []))
+        seq.append(present)
+
+    seen_present = False
+    gap = 0
+    for present in seq:
         if present:
-            if seen_absent_after_present:
+            if seen_present and 0 < gap <= max_gap_frames:
                 return True
             seen_present = True
+            gap = 0
         else:
             if seen_present:
-                seen_absent_after_present = True
+                gap += 1
     return False
 
 
@@ -293,7 +331,7 @@ def determine_vlm_trigger(
         observations, review_item.get("start_pts_ms", 0.0),
         review_item.get("end_pts_ms", 0.0),
     ):
-        return "occlusion", VLM_TRIGGER_QUESTIONS["uncertain"]
+        return "occlusion", VLM_TRIGGER_QUESTIONS["occlusion"]
 
     return None
 
@@ -356,14 +394,20 @@ def make_contact_sheet(frames: list[tuple[int, Any]], *, max_w: int = 480) -> by
 def run_shadow_evaluation(
     session_results: list[dict[str, Any]],
     client,
+    *,
+    contact_sheet_dir: str | Path | None = None,
 ) -> list[dict[str, Any]]:
     """Run offline VLM shadow cross-check using an injected client.
 
-    The client must expose `analyze_contact_sheet(question, image_bytes) -> dict`.
-    This function never touches live state or the event log. In tests, pass a
-    fake client so no network access occurs.
+    The client exposes `analyze_contact_sheet(question, image_bytes) -> dict`
+    and optionally `provider`, `model`, `region` attributes. Returns records
+    including agreement_with_gold. Never touches live state or the event log.
     """
     from .review import _read_jsonl
+
+    sheet_dir = Path(contact_sheet_dir) if contact_sheet_dir else None
+    if sheet_dir is not None:
+        sheet_dir.mkdir(parents=True, exist_ok=True)
 
     records: list[dict[str, Any]] = []
     for session in session_results:
@@ -377,6 +421,8 @@ def run_shadow_evaluation(
         if not video.exists():
             video = root / "annotated_live.mp4"
 
+        session_slug = root.name.replace("/", "_")
+
         for item in queue:
             rid = item["review_item_id"]
             gl = label_map.get(rid)
@@ -385,10 +431,16 @@ def run_shadow_evaluation(
                 continue
             trigger_reason, question = trigger
 
+            provider = getattr(client, "provider", "unknown")
+            model = getattr(client, "model", "unknown")
+            region = getattr(client, "region", "unknown")
+
             if not video.exists():
                 records.append({
                     "status": "skipped", "review_item_id": rid,
                     "trigger": trigger_reason, "reason": "no video source",
+                    "provider": provider, "model": model, "region": region,
+                    "gold_comparison_eligible": False, "agreement_with_gold": None,
                 })
                 continue
 
@@ -398,11 +450,36 @@ def run_shadow_evaluation(
                 records.append({
                     "status": "skipped", "review_item_id": rid,
                     "trigger": trigger_reason, "reason": "contact sheet empty",
+                    "provider": provider, "model": model, "region": region,
+                    "gold_comparison_eligible": False, "agreement_with_gold": None,
                 })
                 continue
 
-            answer = client.analyze_contact_sheet(question, sheet)
             gold = gl if (gl and gl.get("is_ground_truth")) else None
+            gold_eligible = gold is not None
+
+            if sheet_dir is not None:
+                sheet_path = sheet_dir / f"{session_slug}__{rid}__contact_sheet.jpg"
+                sheet_path.write_bytes(sheet)
+
+            try:
+                answer = client.analyze_contact_sheet(question, sheet)
+            except Exception as exc:  # noqa: BLE001 - SHADOW failure must be recorded
+                category = getattr(exc, "category", None) or type(exc).__name__
+                records.append({
+                    "status": "error",
+                    "review_item_id": rid,
+                    "session_directory": session["session_directory"],
+                    "trigger": trigger_reason,
+                    "question": question,
+                    "provider": provider, "model": model, "region": region,
+                    "gold_comparison_eligible": gold_eligible,
+                    "agreement_with_gold": None,
+                    "error_category": category,
+                })
+                continue
+
+            agreement = compute_agreement(gold, answer.get("answer"))
 
             records.append({
                 "status": "executed",
@@ -410,11 +487,66 @@ def run_shadow_evaluation(
                 "session_directory": session["session_directory"],
                 "trigger": trigger_reason,
                 "question": question,
+                "provider": provider, "model": model, "region": region,
                 "sampled_timestamps": [f[0] for f in frames],
                 "answer": answer.get("answer"),
                 "confidence": answer.get("confidence"),
-                "gold_comparison_eligible": gold is not None,
-                "agreement_with_gold": None,
+                "latency_ms": answer.get("latency_ms"),
+                "attempts": answer.get("attempts"),
+                "gold_comparison_eligible": gold_eligible,
+                "agreement_with_gold": agreement,
             })
 
     return records
+
+
+def summarize_shadow(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate SHADOW records into a report-level summary with latency percentiles."""
+    executed = [r for r in records if r.get("status") == "executed"]
+    skipped = [r for r in records if r.get("status") == "skipped"]
+    errors = [r for r in records if r.get("status") == "error"]
+
+    lats = sorted(r["latency_ms"] for r in executed if r.get("latency_ms") is not None)
+    def pct(vals, p):
+        if not vals:
+            return None
+        k = (len(vals) - 1) * p / 100.0
+        f, c = int(k), min(int(k) + 1, len(vals) - 1)
+        return round(vals[f] + (vals[c] - vals[f]) * (k - f), 2)
+
+    answers: dict[str, int] = {}
+    for r in executed:
+        a = r.get("answer")
+        if a in ("yes", "no"):
+            answers[a] = answers.get(a, 0) + 1
+
+    # provider/model/region come from any record (executed, skipped, or error)
+    meta_src = executed[0] if executed else (records[0] if records else {})
+    provider = meta_src.get("provider")
+    model = meta_src.get("model")
+    region = meta_src.get("region")
+
+    comparable = [r for r in executed if r.get("gold_comparison_eligible")]
+    agreed = [r for r in comparable if r.get("agreement_with_gold") is True]
+    disagreed = [r for r in comparable if r.get("agreement_with_gold") is False]
+
+    agreement_rate = None
+    if len(comparable) >= MIN_GOLD_SAMPLE:
+        agreement_rate = round(len(agreed) / len(comparable), 4)
+
+    return {
+        "total_candidates": len(records),
+        "executed": len(executed),
+        "skipped": len(skipped),
+        "errors": len(errors),
+        "provider": provider,
+        "model": model,
+        "region": region,
+        "latency_p50_ms": pct(lats, 50),
+        "latency_p95_ms": pct(lats, 95),
+        "answer_distribution": answers,
+        "gold_comparable_count": len(comparable),
+        "agreement_count": len(agreed),
+        "disagreement_count": len(disagreed),
+        "agreement_rate": agreement_rate,
+    }
