@@ -11,6 +11,7 @@ Cooking is the wedge. The engine generalizes to any hands-on procedural task (ac
 **[CLAUDE.md](CLAUDE.md)** is the full project context: architecture, three-layer perception design, model choices, SOP schema, state engine, hardware, and hackathon priorities. All agents (Claude Code / Codex / OpenCode) and humans start there.
 
 - Hardware shopping list: [docs/hardware-bom.md](docs/hardware-bom.md)
+- API key setup (Gemini, USDA FDC, Supabase): [docs/SETUP-KEYS.md](docs/SETUP-KEYS.md)
 
 ## Repo layout
 
