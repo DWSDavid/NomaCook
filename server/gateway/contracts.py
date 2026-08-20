@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import json
+from types import MappingProxyType
 from typing import Any, ClassVar, Literal, Self
 
 from pydantic import (
@@ -26,6 +27,19 @@ MAX_TOOL_SCHEMA_BYTES = 32 * 1024
 MAX_TEXT_DELTA_BYTES = 8 * 1024
 
 APPROVED_TOOLS = frozenset({"nomacook.speak@1", "nomacook.submit_decision@1"})
+INTERNAL_TO_PROVIDER_TOOL = MappingProxyType(
+    {
+        "nomacook.speak@1": "nomacook_speak_v1",
+        "nomacook.submit_decision@1": "nomacook_submit_decision_v1",
+    }
+)
+PROVIDER_TO_INTERNAL_TOOL = MappingProxyType(
+    {provider: internal for internal, provider in INTERNAL_TO_PROVIDER_TOOL.items()}
+)
+if set(INTERNAL_TO_PROVIDER_TOOL) != set(APPROVED_TOOLS) or len(
+    PROVIDER_TO_INTERNAL_TOOL
+) != len(INTERNAL_TO_PROVIDER_TOOL):
+    raise RuntimeError("Provider Tool alias map must be a one-to-one approved mapping")
 EVENT_TYPES = frozenset(
     {
         "response.accepted",

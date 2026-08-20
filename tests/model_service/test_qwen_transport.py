@@ -26,6 +26,25 @@ def _request() -> ModelRequest:
     )
 
 
+def _request_with_both_tools() -> ModelRequest:
+    payload = json.loads(
+        (REPO / "server/gateway/contract/golden/request.json").read_text()
+    )
+    payload["tools"].append(
+        {
+            "name": "nomacook.submit_decision@1",
+            "description": "Submit a bounded decision.",
+            "parameters": {
+                "type": "object",
+                "properties": {"decision": {"type": "string"}},
+                "required": ["decision"],
+                "additionalProperties": False,
+            },
+        }
+    )
+    return ModelRequest.model_validate_json(json.dumps(payload))
+
+
 def _sse(*payloads: dict[str, Any], done: bool = True) -> bytes:
     lines = [f"data: {json.dumps(payload, ensure_ascii=False)}\n\n" for payload in payloads]
     if done:
@@ -62,8 +81,8 @@ def test_text_usage_done_and_fixed_provider_profile() -> None:
             headers={"content-type": "text/event-stream"},
             content=_sse(
                 {"choices": [{"delta": {"content": "hello"}}]},
-                {"usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}},
                 {"choices": [{"finish_reason": "stop", "delta": {}}]},
+                {"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}},
             ),
             request=request,
         )
@@ -88,18 +107,100 @@ def test_one_tool_index_buffers_name_and_argument_fragments() -> None:
         return httpx.Response(
             200,
             content=_sse(
-                {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "nomacook.speak@1"}}]}}]},
+                {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "nomacook_speak_v1"}}]}}]},
                 {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": '{"text":"hi"}'}}]}}]},
                 {"choices": [{"finish_reason": "tool_calls", "delta": {}}]},
+                {"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}},
             ),
             request=request,
         )
 
     transport, _ = _transport(handler)
     chunks = _run(transport)
-    assert [chunk.kind for chunk in chunks] == ["tool_name", "tool_arguments", "stop"]
+    assert [chunk.kind for chunk in chunks] == ["tool_name", "tool_arguments", "usage", "stop"]
     assert chunks[0].tool_name == "nomacook.speak@1"
     assert chunks[1].tool_arguments == '{"text":"hi"}'
+
+
+def test_payload_uses_provider_safe_aliases_for_both_contract_tools() -> None:
+    async def handler(request: httpx.Request, state: dict[str, Any]) -> httpx.Response:
+        state["request"] = json.loads((await request.aread()).decode())
+        return httpx.Response(
+            200,
+            content=_sse(
+                {"choices": [{"finish_reason": "stop", "delta": {}}]},
+                {"choices": [], "usage": {"total_tokens": 1}},
+            ),
+            request=request,
+        )
+
+    transport, state = _transport(handler)
+
+    async def run() -> list[ProviderChunk]:
+        return [chunk async for chunk in transport.stream(_request_with_both_tools())]
+
+    asyncio.run(run())
+    assert [tool["function"]["name"] for tool in state["request"]["tools"]] == [
+        "nomacook_speak_v1",
+        "nomacook_submit_decision_v1",
+    ]
+
+
+def test_unknown_provider_tool_alias_is_fail_closed() -> None:
+    async def handler(request: httpx.Request, state: dict[str, Any]) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=_sse(
+                {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "unknown_tool_v1"}}]}}]},
+                {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": '{"text":"hi"}'}}]}}]},
+                {"choices": [{"finish_reason": "tool_calls", "delta": {}}]},
+                {"choices": [], "usage": {"total_tokens": 1}},
+            ),
+            request=request,
+        )
+
+    transport, _ = _transport(handler)
+    with pytest.raises(QwenTransportError) as exc:
+        _run(transport)
+    assert exc.value.error.code == "MODEL_RESPONSE_INVALID"
+
+
+def test_multiple_finish_chunks_are_invalid() -> None:
+    async def handler(request: httpx.Request, state: dict[str, Any]) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=_sse(
+                {"choices": [{"finish_reason": "stop", "delta": {}}]},
+                {"choices": [{"finish_reason": "stop", "delta": {}}]},
+            ),
+            request=request,
+        )
+
+    transport, _ = _transport(handler)
+    with pytest.raises(QwenTransportError) as exc:
+        _run(transport)
+    assert exc.value.error.code == "MODEL_RESPONSE_INVALID"
+
+
+@pytest.mark.parametrize(
+    "delta",
+    [{"content": "late"}, {"tool_calls": [{"index": 0, "function": {"name": "nomacook_speak_v1"}}]}],
+)
+def test_provider_content_after_finish_is_invalid(delta: dict[str, Any]) -> None:
+    async def handler(request: httpx.Request, state: dict[str, Any]) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=_sse(
+                {"choices": [{"finish_reason": "stop", "delta": {}}]},
+                {"choices": [{"delta": delta}]},
+            ),
+            request=request,
+        )
+
+    transport, _ = _transport(handler)
+    with pytest.raises(QwenTransportError) as exc:
+        _run(transport)
+    assert exc.value.error.code == "MODEL_RESPONSE_INVALID"
 
 
 def test_two_tool_indexes_are_invalid() -> None:
@@ -126,6 +227,8 @@ def test_reasoning_content_is_ignored_and_never_becomes_text() -> None:
             content=_sse(
                 {"choices": [{"delta": {"reasoning_content": "private"}}]},
                 {"choices": [{"delta": {"content": "visible"}}]},
+                {"choices": [{"finish_reason": "stop", "delta": {}}]},
+                {"choices": [], "usage": {"total_tokens": 1}},
             ),
             request=request,
         )

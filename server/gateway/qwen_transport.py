@@ -9,7 +9,11 @@ from typing import Any, AsyncIterator, Literal
 
 import httpx
 
-from .contracts import ModelRequest
+from .contracts import (
+    INTERNAL_TO_PROVIDER_TOOL,
+    PROVIDER_TO_INTERNAL_TOOL,
+    ModelRequest,
+)
 from .errors import ModelServiceError
 
 
@@ -85,6 +89,8 @@ class QwenAgentTransport:
             )
 
         seen_done = False
+        pending_finish_reason: str | None = None
+        seen_usage_after_finish = False
         active_tool_index: int | None = None
         argument_bytes = 0
         try:
@@ -148,19 +154,45 @@ class QwenAgentTransport:
                     if not isinstance(item, dict):
                         raise self._invalid_response()
 
-                    usage = item.get("usage")
-                    if usage is not None:
-                        yield ProviderChunk(kind="usage", usage=_usage(usage))
-
                     choices = item.get("choices", [])
                     if not isinstance(choices, list):
                         raise self._invalid_response()
+                    usage = item.get("usage")
+                    if pending_finish_reason is not None:
+                        # After a finish choice, only one choices=[] usage
+                        # tail is legal before [DONE].
+                        if choices or usage is None or seen_usage_after_finish:
+                            raise self._invalid_response()
+                        yield ProviderChunk(kind="usage", usage=_usage(usage))
+                        seen_usage_after_finish = True
+                        continue
+                    if usage is not None:
+                        raise self._invalid_response()
+
                     for choice in choices:
                         if not isinstance(choice, dict):
                             raise self._invalid_response()
                         delta = choice.get("delta") or {}
                         if not isinstance(delta, dict):
                             raise self._invalid_response()
+
+                        finish_reason = choice.get("finish_reason")
+                        if finish_reason is not None:
+                            if finish_reason == "tool_calls":
+                                finish_reason = "tool_call"
+                            if finish_reason not in {
+                                "stop",
+                                "tool_call",
+                                "length",
+                                "content_filter",
+                            }:
+                                raise self._invalid_response()
+                            if delta.get("content") or delta.get("tool_calls"):
+                                raise self._invalid_response()
+                            if pending_finish_reason is not None:
+                                raise self._invalid_response()
+                            pending_finish_reason = finish_reason
+                            continue
 
                         content = delta.get("content")
                         if content is not None:
@@ -189,8 +221,13 @@ class QwenAgentTransport:
                             if name is not None:
                                 if not isinstance(name, str) or not name:
                                     raise self._invalid_response()
+                                internal_name = PROVIDER_TO_INTERNAL_TOOL.get(name)
+                                if internal_name is None:
+                                    raise self._invalid_response()
                                 yield ProviderChunk(
-                                    kind="tool_name", tool_index=index, tool_name=name
+                                    kind="tool_name",
+                                    tool_index=index,
+                                    tool_name=internal_name,
                                 )
                             arguments = function.get("arguments")
                             if arguments is not None:
@@ -206,21 +243,9 @@ class QwenAgentTransport:
                                         tool_arguments=arguments,
                                     )
 
-                        finish_reason = choice.get("finish_reason")
-                        if finish_reason is not None:
-                            if finish_reason == "tool_calls":
-                                finish_reason = "tool_call"
-                            if finish_reason not in {
-                                "stop",
-                                "tool_call",
-                                "length",
-                                "content_filter",
-                            }:
-                                raise self._invalid_response()
-                            yield ProviderChunk(kind="stop", finish_reason=finish_reason)
-
-                if not seen_done:
+                if not seen_done or pending_finish_reason is None or not seen_usage_after_finish:
                     raise self._invalid_response()
+                yield ProviderChunk(kind="stop", finish_reason=pending_finish_reason)
         except asyncio.CancelledError:
             raise
         except QwenTransportError:
@@ -266,7 +291,7 @@ class QwenAgentTransport:
                 {
                     "type": "function",
                     "function": {
-                        "name": tool.name,
+                        "name": INTERNAL_TO_PROVIDER_TOOL[tool.name],
                         "description": tool.description,
                         "parameters": tool.parameters,
                     },

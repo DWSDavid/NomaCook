@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import AsyncIterator
 
 import pytest
+import httpx
 
 from server.gateway.contracts import ModelEvent, ModelRequest
 from server.gateway.errors import ModelServiceError
-from server.gateway.qwen_transport import ProviderChunk, QwenTransportError
+from server.gateway.qwen_transport import (
+    ProviderChunk,
+    QwenAgentConfig,
+    QwenAgentTransport,
+    QwenTransportError,
+)
 from server.gateway.service import AgentModelService
 
 
@@ -44,6 +51,22 @@ def _collect(service: AgentModelService, request: ModelRequest) -> list[ModelEve
     return asyncio.run(run())
 
 
+def _sse(*payloads: dict) -> bytes:
+    lines = [f"data: {json.dumps(payload)}\n\n" for payload in payloads]
+    lines.append("data: [DONE]\n\n")
+    return "".join(lines).encode()
+
+
+def _real_transport_fake_sse(payloads: list[dict]) -> QwenAgentTransport:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=_sse(*payloads), request=request)
+
+    return QwenAgentTransport(
+        QwenAgentConfig(api_key="fake", workspace_id="fake"),
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+
 def test_text_stop_and_usage_produce_complete_stream() -> None:
     transport = FakeTransport(
         [
@@ -62,6 +85,46 @@ def test_text_stop_and_usage_produce_complete_stream() -> None:
     ]
     assert events[-1].data["stop_reason"] == "stop"
     assert transport.calls == 1
+
+
+def test_text_official_finish_usage_done_order_reaches_message_end() -> None:
+    transport = _real_transport_fake_sse(
+        [
+            {"choices": [{"delta": {"content": "hello"}}]},
+            {"choices": [{"finish_reason": "stop", "delta": {}}]},
+            {"choices": [], "usage": {"total_tokens": 12}},
+        ]
+    )
+    events = _collect(AgentModelService(transport), _request())
+    assert [event.event_type for event in events] == [
+        "response.accepted",
+        "message.start",
+        "text.delta",
+        "usage",
+        "message.end",
+    ]
+    assert events[-2].data == {"total_tokens": 12}
+
+
+def test_tool_official_finish_usage_done_order_reaches_message_end() -> None:
+    transport = _real_transport_fake_sse(
+        [
+            {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "nomacook_speak_v1"}}]}}]},
+            {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": '{"text":"hello"}'}}]}}]},
+            {"choices": [{"finish_reason": "tool_calls", "delta": {}}]},
+            {"choices": [], "usage": {"total_tokens": 12}},
+        ]
+    )
+    events = _collect(AgentModelService(transport), _request())
+    assert [event.event_type for event in events] == [
+        "response.accepted",
+        "message.start",
+        "usage",
+        "tool.call",
+        "message.end",
+    ]
+    assert events[3].data["name"] == "nomacook.speak@1"
+    assert events[2].data == {"total_tokens": 12}
 
 
 def test_complete_allowed_tool_call_is_emitted_once() -> None:
