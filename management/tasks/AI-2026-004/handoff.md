@@ -29,6 +29,7 @@
 - constant-time service token、bounded provider_call_id registry、容量、取消、唯一终态和安全错误；
 - `/health`、fail-closed `/ready`、`/v1/agent-model:stream`；
 - `tests/model_service` `59 passed / 0 skipped`，既有 VLM/Event 边界测试 `21 passed`。
+- 收尾全量仓库回归 `331 passed, 1 warning`，exit `0`；warning 为既有 Starlette/httpx deprecation。
 
 后续 Integration：必须由独立任务启动真实 FastAPI 服务，注入 Fake Qwen Transport，连接真实 Node
 production adapter，完成一次完整 Agent Turn；本任务不证明 Node↔Python、真实 Qwen、Backend、App、Hardware、WebRTC 或物理烹饪完成。

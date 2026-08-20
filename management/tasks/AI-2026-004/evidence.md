@@ -33,6 +33,7 @@
 - Existing unaffected focus：`python -m pytest tests/test_vlm_contract.py tests/test_runtime_event_boundaries.py -q` → `21 passed`，exit `0`。
 - `python -m compileall -q server/gateway`：exit `0`；`git diff --check`：exit `0`。
 - FastAPI TestClient 输出一项既有 Starlette/httpx deprecation warning；不影响通过结果。
+- 收尾全量仓库回归：`python -m pytest -q` → `331 passed, 1 warning`，exit `0`；warning 仍为既有 Starlette/httpx deprecation。
 
 ### Scope and privacy
 

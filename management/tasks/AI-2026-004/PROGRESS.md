@@ -38,3 +38,5 @@
 - `e5bafe2876d225a0a1c5514ea7236d744343773f`、`69fc659`：脱敏测试夹具和扫描文本收口；最终完整 SHA 以 Git 核验为准。
 
 当前执行状态：`machine-complete / manager-review-pending / integration-pending`。
+
+- 收尾全量回归：`python -m pytest -q` → `331 passed, 1 warning`，exit `0`；无 skip。
