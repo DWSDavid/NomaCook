@@ -48,3 +48,46 @@
 服务实现包含严格 Request/Event DTO、512 KiB 请求/64 KiB 行/512 事件/8 KiB text delta/8 messages/2 Tools/60 秒约束、constant-time Bearer auth、bounded duplicate registry、Fake Qwen SSE transport、一次 Tool 校验、取消和 FastAPI readiness/stream。
 
 结论：`machine-complete / manager-review-pending / integration-pending`。
+
+## Closed P0 Delta — 2026-08-20
+
+### Authority and root-cause evidence
+
+- Reviewed Head `a2580386aee0d374b8338f804e2768d1e854ea89` 与 Manager Review
+  `9c5a5be45bcc5f41f14da179f39ff16d1c646e04` 均为当前分支祖先；`task.yaml`、`review.yaml` 未修改。
+- P0-001 最小复现读取公开 golden 请求并检查 `_payload`：修复前供应商名称为
+  `nomacook.speak@1`；P0-002 Fake Transport 按 finish→usage→DONE 输入时，修复前事件为
+  `response.accepted/message.start/text.delta/response.failed`，错误码
+  `MODEL_RESPONSE_INVALID`。
+- 根因：内部合同 Tool 名称直接写入供应商 `function.name`；Transport 在 finish choice 处立即
+  发出 `stop`，Service 随后拒绝合法 usage 尾块。
+
+### RED → GREEN
+
+- RED：`pytest tests/model_service/test_qwen_transport.py tests/model_service/test_service.py -q`
+  exit `1`，`9 failed / 21 passed`。
+- GREEN：同一命令 exit `0`，`30 passed`。
+- P0-001 GREEN 覆盖安全别名 payload、别名反向映射、未知别名、多 Tool/冲突 fail-closed。
+- P0-002 GREEN 覆盖 text 与 Tool 的 finish→usage-only→DONE、usage 保留、multiple finish、
+  finish 后 text/tool、缺 DONE fail-closed；Service 最终顺序为 usage 后唯一 message.end。
+
+### Delta implementation
+
+- 增加固定一对一映射：
+  `nomacook.speak@1 ↔ nomacook_speak_v1`、
+  `nomacook.submit_decision@1 ↔ nomacook_submit_decision_v1`；只向 Qwen 发送安全别名，返回后还原内部合同名。
+- Transport 暂存唯一 finish_reason，拒绝 finish 后的非 usage-only chunk，要求 DONE，最后只 yield 一次 stop。
+- P0 Delta 提交：`ec5cb67f36c3a7eb08848b613f9cb63934266aea`。
+
+### Delta verification
+
+- `tests/model_service`：`66 passed / 0 skipped`，exit `0`。
+- `tests/test_vlm_contract.py tests/test_runtime_event_boundaries.py`：`21 passed`，exit `0`。
+- `compileall -q server/gateway`：exit `0`；`git diff --check`：exit `0`。
+- Delta changed paths from Manager Review：仅 `server/gateway/contracts.py`、
+  `server/gateway/qwen_transport.py`、`tests/model_service/test_qwen_transport.py`、
+  `tests/model_service/test_service.py`；均在 allowed paths。
+- Forbidden-domain scan、secret-pattern scan：无匹配；未调用真实 Qwen、Node、Backend、App、Hardware、WebRTC。
+- `git status --short`：仍仅 `?? .gitkeep`、`?? config.yaml`；两个文件未读取、未修改、未暂存、未提交。
+
+Delta 状态：`manager-review-pending / integration-pending`。

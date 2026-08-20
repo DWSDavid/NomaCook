@@ -33,3 +33,13 @@
 
 后续 Integration：必须由独立任务启动真实 FastAPI 服务，注入 Fake Qwen Transport，连接真实 Node
 production adapter，完成一次完整 Agent Turn；本任务不证明 Node↔Python、真实 Qwen、Backend、App、Hardware、WebRTC 或物理烹饪完成。
+
+## P0 Delta Handoff — 2026-08-20
+
+- 已封闭修复两个 Review P0，提交：`ec5cb67f36c3a7eb08848b613f9cb63934266aea`。
+- P0-001：内部 Tool 合同名保持不变；Qwen payload 使用 `nomacook_speak_v1` /
+  `nomacook_submit_decision_v1`，返回别名严格反向映射，未知/多 Tool fail-closed。
+- P0-002：finish_reason 暂存；仅接受最终 choices=[] usage 尾块和 `[DONE]`，然后输出唯一 stop；
+  finish 后 text/tool、multiple finish、缺 DONE 均 fail-closed。
+- P0 focused `30 passed`；service 全量 `66 passed / 0 skipped`；既有边界 `21 passed`。
+- 当前等待 Manager 封闭式 Delta Review；不处理 P1/P2，不执行真实 Qwen 或 Node↔Python Integration。

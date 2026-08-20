@@ -40,3 +40,18 @@
 当前执行状态：`machine-complete / manager-review-pending / integration-pending`。
 
 - 收尾全量回归：`python -m pytest -q` → `331 passed, 1 warning`，exit `0`；无 skip。
+
+## P0 Delta — 2026-08-20
+
+- Delta 基线：Reviewed Head `a2580386aee0d374b8338f804e2768d1e854ea89` 与 Manager Review
+  `9c5a5be45bcc5f41f14da179f39ff16d1c646e04` 均在当前分支祖先链；未修改 `task.yaml` 或 `review.yaml`。
+- RED：P0 focused `tests/model_service/test_qwen_transport.py tests/model_service/test_service.py`
+  exit `1`，`9 failed / 21 passed`；复现内部 Tool 名称直发供应商，以及 finish→usage→DONE 被
+  service 收口为 `response.failed/MODEL_RESPONSE_INVALID`。
+- GREEN：同一 P0 focused 命令 `30 passed`，exit `0`。
+- GREEN：`tests/model_service` `66 passed / 0 skipped`，exit `0`；既有 VLM/Event focused `21 passed`。
+- `compileall`、`git diff --check`、allowed-path 和 privacy scans 均通过；状态仍严格只有
+  `?? .gitkeep`、`?? config.yaml`。
+- P0 Delta 实现提交：`ec5cb67f36c3a7eb08848b613f9cb63934266aea`。
+
+当前状态：`manager-review-pending / integration-pending`；等待针对两个 P0 的封闭式 Manager Delta Review。
