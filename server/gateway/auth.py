@@ -1,4 +1,4 @@
-"""Constant-time service Bearer authentication."""
+"""Constant-time service bearer-token authentication."""
 
 from __future__ import annotations
 
