@@ -1,0 +1,32 @@
+{
+  "contract_version": "ai-model-service.contract.v1",
+  "schema_version": "1.0",
+  "request_id": "request_demo_01",
+  "turn_id": "turn_demo_01",
+  "provider_call_id": "provider_call_demo_01",
+  "capability": "agent_tool_stream_v1",
+  "started_at": "2026-08-20T10:00:00Z",
+  "deadline_at": "2026-08-20T10:00:30Z",
+  "timeout_ms": 30000,
+  "messages": [
+    {"role": "system", "content": "You are a cooking assistant."},
+    {"role": "user", "content": "What should I do next?"}
+  ],
+  "tools": [
+    {
+      "name": "nomacook.speak@1",
+      "description": "Speak a short grounded instruction.",
+      "parameters": {
+        "type": "object",
+        "properties": {"text": {"type": "string"}},
+        "required": ["text"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "options": {
+    "max_output_tokens": 1024,
+    "temperature": 0.2,
+    "tool_choice": "auto"
+  }
+}

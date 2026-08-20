@@ -1,9 +1,9 @@
 schema_version: 1
 task_id: "AI-2026-004"
-review_status: "pending"
-review_result: ""
-reviewed_head_commit: ""
-review_mode: "MVP-first-review"
+review_status: "approved"
+review_result: "MVP-review-passed / backlog-recorded"
+reviewed_head_commit: "7d6259a4cd970e0dfc291e5d5ef2c313727c56ef"
+review_mode: "MVP-delta-review"
 review_scope:
   - "Strict Agent Model request and provider-neutral NDJSON events."
   - "One-call Qwen stream, complete Tool argument validation and no retry/fallback."
@@ -11,6 +11,19 @@ review_scope:
   - "Isolation from existing perception, StateEngine, VLM, voice and private configuration."
 findings: []
 required_changes: []
-verification_accepted: []
-residual_risks: []
-next_state: "review"
+verification_accepted:
+  - "Executor evidence records 59 model-service tests, 21 existing boundary tests, 331 full repository tests, compileall, diff-check, allowed-path and privacy scans passing with zero skips."
+  - "Manager confirmed activation commit 178ef27333cf7cdb8d6156e22bc4000124dc8bd3 is an ancestor, all 27 Delta paths are allowed, task/review files were unchanged by the executor and only the pre-existing untracked .gitkeep/config.yaml remain."
+  - "Manager did not rerun full suites or read private files; only public code, official provider documentation and two synthetic minimal checks were used."
+  - "Delta evidence records P0 focused 30 passed, model-service 66 passed/0 skipped, existing boundary 21 passed, compileall, diff, path and privacy checks passing."
+  - "Manager reran only the two prior synthetic checks: payload Tool name was nomacook_speak_v1 and official finish→usage→DONE produced usage followed by message.end."
+residual_risks:
+  - "P1 backlog: AgentModelService has a heartbeat method but does not run a concurrent heartbeat while Qwen is idle."
+  - "P1 backlog: FastAPI reads the complete chunked request body before applying the 512 KiB post-read check when Content-Length is absent."
+  - "P1 backlog: Qwen timeout uses deadline_at-started_at duration rather than remaining wall-clock time at provider admission."
+  - "P1 backlog: shared httpx.AsyncClient is not closed through a FastAPI lifespan hook."
+  - "P1 backlog: ServiceSettings clamps invalid numeric environment values and permits short service tokens/non-loopback plaintext host instead of rejecting configuration fail-closed."
+  - "P1 backlog: Provider Tool Call id is not preserved in the provider-neutral tool.call event; Node currently creates a deterministic local fallback."
+  - "P2 backlog: event timestamps default to the stream creation time unless an explicit heartbeat time is supplied."
+  - "Real Node, Backend, Qwen, App, Hardware and WebRTC remain integration-pending."
+next_state: "integration_pending"
