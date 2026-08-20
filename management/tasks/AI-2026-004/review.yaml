@@ -1,0 +1,16 @@
+schema_version: 1
+task_id: "AI-2026-004"
+review_status: "pending"
+review_result: ""
+reviewed_head_commit: ""
+review_mode: "MVP-first-review"
+review_scope:
+  - "Strict Agent Model request and provider-neutral NDJSON events."
+  - "One-call Qwen stream, complete Tool argument validation and no retry/fallback."
+  - "Service auth, provider_call_id registry, cancellation, health/readiness and privacy."
+  - "Isolation from existing perception, StateEngine, VLM, voice and private configuration."
+findings: []
+required_changes: []
+verification_accepted: []
+residual_risks: []
+next_state: "review"
