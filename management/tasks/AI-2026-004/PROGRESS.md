@@ -55,3 +55,8 @@
 - P0 Delta 实现提交：`ec5cb67f36c3a7eb08848b613f9cb63934266aea`。
 
 当前状态：`manager-review-pending / integration-pending`；等待针对两个 P0 的封闭式 Manager Delta Review。
+- Manager Delta Review：`e5d3fb2c11b46bd6d3b6a248a76fa13520ce62ad`，结论 `MVP-review-passed / backlog-recorded`。
+- AI 基线分支 `agent/cv-live-camera` Merge Commit：`3d1fac90124200061291115bb5e9da861640c7a3`。
+- 合并后 model-service 66/66、既有边界 21/21、compileall 与 diff-check 全部通过。
+- `.gitkeep`、私密 `config.yaml` 继续保持未跟踪且未读取、未修改、未暂存。
+- 最终状态：`done / MVP-review-passed`；真实 Node↔Python/Qwen 保持后续 Integration Task。

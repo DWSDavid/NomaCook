@@ -42,4 +42,5 @@ production adapter，完成一次完整 Agent Turn；本任务不证明 Node↔P
 - P0-002：finish_reason 暂存；仅接受最终 choices=[] usage 尾块和 `[DONE]`，然后输出唯一 stop；
   finish 后 text/tool、multiple finish、缺 DONE 均 fail-closed。
 - P0 focused `30 passed`；service 全量 `66 passed / 0 skipped`；既有边界 `21 passed`。
-- 当前等待 Manager 封闭式 Delta Review；不处理 P1/P2，不执行真实 Qwen 或 Node↔Python Integration。
+- 已通过 Manager Delta Review，并以 Merge Commit `3d1fac90124200061291115bb5e9da861640c7a3` 进入 `agent/cv-live-camera`。合并后 model-service、既有边界和 compileall 全部通过。
+- 最终状态：`done / MVP-review-passed`。不处理 P1/P2；真实 Node↔Python、Qwen、Backend、App、Hardware 和 WebRTC 保持后续 Integration。

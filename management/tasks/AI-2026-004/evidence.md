@@ -91,3 +91,11 @@
 - `git status --short`：仍仅 `?? .gitkeep`、`?? config.yaml`；两个文件未读取、未修改、未暂存、未提交。
 
 Delta 状态：`manager-review-pending / integration-pending`。
+
+## Manager Merge Closeout
+
+- Manager Delta Review：`e5d3fb2c11b46bd6d3b6a248a76fa13520ce62ad`，`MVP-review-passed / backlog-recorded`。
+- AI `agent/cv-live-camera` Merge Commit：`3d1fac90124200061291115bb5e9da861640c7a3`。
+- 合并前与合并后均验证：model-service 66/66、0 skip；既有 VLM/Event 21/21；compileall、`git diff --check` 退出码 `0`。
+- 合并后仍只有 `?? .gitkeep`、`?? config.yaml`；两者未读取、修改、暂存或提交。
+- 真实 Node、Backend、Qwen、App、Hardware 和 WebRTC 未执行，继续由独立 Integration Task 负责。
