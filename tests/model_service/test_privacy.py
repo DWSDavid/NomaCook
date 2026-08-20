@@ -4,7 +4,7 @@ from server.gateway.errors import ModelServiceError, safe_error
 
 
 def test_unknown_exception_maps_to_fixed_safe_error() -> None:
-    error = safe_error(Exception("Bearer secret-value"))
+    error = safe_error(Exception("service credential private-value"))
     assert error == ModelServiceError(
         code="AI_MODEL_SERVICE_ERROR",
         retryable=False,

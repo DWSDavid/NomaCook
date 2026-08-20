@@ -34,7 +34,7 @@ class FakeTransport:
 
 def _settings(**overrides: object) -> ServiceSettings:
     values: dict[str, object] = {
-        "service_token": "agent-service-secret",
+        "service_token": "local",
         "max_concurrency": 2,
         "request_timeout_ms": 30000,
         "qwen_enabled": True,
@@ -115,7 +115,7 @@ def test_body_limit_returns_413_before_model() -> None:
         "/v1/agent-model:stream",
         content=body,
         headers={
-            "authorization": "Bearer agent-service-secret",
+            "authorization": "Bearer local",
             "content-type": "application/json",
         },
     )
@@ -126,7 +126,7 @@ def test_body_limit_returns_413_before_model() -> None:
 def test_valid_request_is_ndjson_and_duplicate_is_409() -> None:
     client, _, transport = _client()
     headers = {
-        "authorization": "Bearer agent-service-secret",
+            "authorization": "Bearer local",
         "content-type": "application/json",
         "accept": "application/x-ndjson",
     }
@@ -149,7 +149,7 @@ def test_capacity_full_returns_service_busy() -> None:
     response = client.post(
         "/v1/agent-model:stream",
         content=REQUEST_BODY,
-        headers={"authorization": "Bearer agent-service-secret"},
+        headers={"authorization": "Bearer local"},
     )
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "SERVICE_BUSY"
@@ -194,7 +194,7 @@ def test_disconnect_path_releases_capacity_and_registry() -> None:
             response = await http.post(
                 "/v1/agent-model:stream",
                 content=REQUEST_BODY,
-                headers={"authorization": "Bearer agent-service-secret"},
+                headers={"authorization": "Bearer local"},
             )
             assert response.status_code == 200
         assert app.state.capacity.active == 0
