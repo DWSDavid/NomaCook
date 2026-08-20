@@ -1,16 +1,51 @@
 schema_version: 1
 task_id: "AI-2026-004"
-review_status: "pending"
-review_result: ""
-reviewed_head_commit: ""
+review_status: "changes_requested"
+review_result: "blocked-by-P0"
+reviewed_head_commit: "a2580386aee0d374b8338f804e2768d1e854ea89"
 review_mode: "MVP-first-review"
 review_scope:
   - "Strict Agent Model request and provider-neutral NDJSON events."
   - "One-call Qwen stream, complete Tool argument validation and no retry/fallback."
   - "Service auth, provider_call_id registry, cancellation, health/readiness and privacy."
   - "Isolation from existing perception, StateEngine, VLM, voice and private configuration."
-findings: []
-required_changes: []
-verification_accepted: []
-residual_risks: []
+findings:
+  - id: "P0-AI-2026-004-001"
+    severity: "P0"
+    title: "内部 Tool 名称不符合百炼 Function Calling 字符约束"
+    files:
+      - "server/gateway/qwen_transport.py:258"
+      - "server/gateway/contracts.py:31"
+    trigger: "任意携带 nomacook.speak@1 或 nomacook.submit_decision@1 的真实 Qwen3.6 Tool 请求。"
+    impact: "当前 _payload 将内部合同名原样写入 function.name，其中包含点号和 @。百炼 OpenAI-compatible Function Calling 只允许字母、数字、下划线和短划线，真实供应商会在模型执行前拒绝请求，Agent Tool 主链无法开始。"
+    contract: "CONTRACT-AI-MODEL-SERVICE-001 v1 第 5、7、13 节；内部合同名必须保持，但 Provider Adapter 必须做供应商安全映射。"
+    evidence: "Manager 读取阿里云官方 Function Calling 字段约束，并以当前 _payload 最小检查确认实际发送 nomacook.speak@1；未调用真实模型。"
+  - id: "P0-AI-2026-004-002"
+    severity: "P0"
+    title: "官方 finish_reason 后的 usage 尾块被误判为非法 stop 后事件"
+    files:
+      - "server/gateway/qwen_transport.py:151"
+      - "server/gateway/qwen_transport.py:209"
+      - "server/gateway/service.py:31"
+    trigger: "Qwen 使用 stream=true 与 stream_options.include_usage=true，先返回带 finish_reason 的 choice chunk，再返回 choices=[] 的最终 usage chunk，最后 [DONE]。"
+    impact: "Transport 先 yield stop，随后 yield usage；AgentModelService 在 stop_reason 非空后拒绝任何后续 chunk，因此每次符合官方顺序的正常文本或 Tool 响应都会变成 response.failed/MODEL_RESPONSE_INVALID。"
+    contract: "CONTRACT-AI-MODEL-SERVICE-001 v1 第 4、6、7、13 节；usage 与正常唯一终态必须按供应商流正确归一化。"
+    evidence: "Manager 使用 Fake Transport 按官方 finish→usage 顺序复现，最终稳定输出 response.failed MODEL_RESPONSE_INVALID；现有测试使用了 usage→stop 的反向顺序。"
+required_changes:
+  - "在 Qwen Provider Adapter 内增加双向固定别名：例如 nomacook.speak@1 ↔ nomacook_speak_v1、nomacook.submit_decision@1 ↔ nomacook_submit_decision_v1。只向供应商发送安全别名；收到 Tool name 后严格反向映射回内部合同名，未知别名 fail-closed。不得修改正式合同内部名称。"
+  - "按官方顺序规范化 finish/usage：Transport 暂存唯一 finish_reason，继续接受最终 usage-only chunk，在 [DONE] 前后完成一致性检查，最后只 yield 一次 stop；或实现等价的、可证明不会把合法尾部 usage 判错的顺序。"
+  - "增加 RED/GREEN：检查供应商 payload 只含安全别名；供应商返回安全别名后服务输出内部 Tool 名；官方 text/tool 的 finish→usage→DONE 顺序均正常 message.end；多 finish、stop 后 text/tool、缺 DONE 或未知别名仍 fail-closed。"
+verification_accepted:
+  - "Executor evidence records 59 model-service tests, 21 existing boundary tests, 331 full repository tests, compileall, diff-check, allowed-path and privacy scans passing with zero skips."
+  - "Manager confirmed activation commit 178ef27333cf7cdb8d6156e22bc4000124dc8bd3 is an ancestor, all 27 Delta paths are allowed, task/review files were unchanged by the executor and only the pre-existing untracked .gitkeep/config.yaml remain."
+  - "Manager did not rerun full suites or read private files; only public code, official provider documentation and two synthetic minimal checks were used."
+residual_risks:
+  - "P1 backlog: AgentModelService has a heartbeat method but does not run a concurrent heartbeat while Qwen is idle."
+  - "P1 backlog: FastAPI reads the complete chunked request body before applying the 512 KiB post-read check when Content-Length is absent."
+  - "P1 backlog: Qwen timeout uses deadline_at-started_at duration rather than remaining wall-clock time at provider admission."
+  - "P1 backlog: shared httpx.AsyncClient is not closed through a FastAPI lifespan hook."
+  - "P1 backlog: ServiceSettings clamps invalid numeric environment values and permits short service tokens/non-loopback plaintext host instead of rejecting configuration fail-closed."
+  - "P1 backlog: Provider Tool Call id is not preserved in the provider-neutral tool.call event; Node currently creates a deterministic local fallback."
+  - "P2 backlog: event timestamps default to the stream creation time unless an explicit heartbeat time is supplied."
+  - "Real Node, Backend, Qwen, App, Hardware and WebRTC remain integration-pending."
 next_state: "review"
