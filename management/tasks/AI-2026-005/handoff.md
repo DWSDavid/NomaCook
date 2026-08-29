@@ -14,6 +14,11 @@ Do not read `config.yaml`, call Qwen, open local microphone/speaker, start other
 - 当前状态：`machine-complete / manager-review-pending / integration-pending`，等待同任务封闭式 Manager Delta Review。
 - `?? .gitkeep` 与 `?? config.yaml` 保持原样且未读取；未处理 P1/P2，未启动其他端、未部署、未 push、未 merge。
 
+Final closed Delta: fix only combined production readiness. Return 503 when
+either Agent Model Service or Realtime is unready and 200 only when both are
+ready; retain both production routes and Provider calls 0. Submit implementation
+and evidence commits, then stop for final Delta Review.
+
 ## Executor Handoff — 2026-08-29
 
 状态：`machine-complete / manager-review-pending / integration-pending`。

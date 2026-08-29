@@ -18,7 +18,12 @@ Status: `ready / execution-pending`.
 - `compileall -q server/realtime server/gateway`、`git diff --check`、allowed-path/privacy scans 均通过。
 - 实现/测试 Commit：`7c6e9ae29d80b7fb01c311d530cbac4c48863a1a`。
 
-当前状态：`machine-complete / manager-review-pending / integration-pending`。
+当前状态：`blocked-by-P0 / manager-final-delta-review-pending / integration-pending`。
+
+Manager closed Delta Review confirms P0-001/002/003 are fixed. One P0 newly
+introduced by production composition remains: combined `/ready` reports 200
+when Realtime is ready but the retained Agent Model Service is absent. Fix only
+that readiness invariant.
 
 ## Executor Verification — 2026-08-29
 
