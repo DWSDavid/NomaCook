@@ -21,6 +21,7 @@ ProviderEventType = Literal[
     "audio_started",
     "audio_pcm",
     "audio_done",
+    "response_done",
     "error",
 ]
 
@@ -32,6 +33,8 @@ class ProviderEvent:
     pcm: bytes | None = None
     error_code: str | None = None
     error_message: str | None = None
+    response_id: str | None = None
+    status: str | None = None
 
 
 class RealtimeProvider(Protocol):
@@ -41,7 +44,7 @@ class RealtimeProvider(Protocol):
 
     async def update_context(self, revision: int, context: dict[str, Any]) -> None: ...
 
-    async def announce(self, payload: dict[str, Any]) -> None: ...
+    async def announce(self, payload: dict[str, Any]) -> str: ...
 
     async def cancel_response(self) -> None: ...
 
@@ -77,6 +80,9 @@ class QwenRealtimeProvider:
         self._ws: Any | None = None
         self._events: asyncio.Queue[ProviderEvent] = asyncio.Queue()
         self._reader: asyncio.Task[None] | None = None
+        self._session_updated = asyncio.Event()
+        self._pending_response_id: str | None = None
+        self._response_id: str | None = None
         self._paused = False
         self._stopped = False
 
@@ -97,6 +103,7 @@ class QwenRealtimeProvider:
             close_timeout=2,
         )
         self._stopped = False
+        self._session_updated = asyncio.Event()
         self._reader = asyncio.create_task(self._read_loop(), name="qwen-realtime-reader")
         await self._send(
             {
@@ -114,6 +121,10 @@ class QwenRealtimeProvider:
                 },
             }
         )
+        try:
+            await asyncio.wait_for(self._session_updated.wait(), timeout=3.0)
+        except asyncio.TimeoutError as exc:
+            raise RuntimeError("Qwen session.updated timeout") from exc
         await self._events.put(ProviderEvent("ready"))
 
     async def send_audio(self, pcm16: bytes) -> None:
@@ -141,9 +152,11 @@ class QwenRealtimeProvider:
             }
         )
 
-    async def announce(self, payload: dict[str, Any]) -> None:
+    async def announce(self, payload: dict[str, Any]) -> str:
         if self._stopped or self._ws is None:
             raise RuntimeError("provider is not running")
+        response_id = f"announce:{payload['utterance_id']}"
+        self._pending_response_id = response_id
         await self._send(
             {
                 "type": "conversation.item.create",
@@ -155,6 +168,7 @@ class QwenRealtimeProvider:
             }
         )
         await self._send({"type": "response.create"})
+        return response_id
 
     async def cancel_response(self) -> None:
         if self._ws is not None and not self._stopped:
@@ -198,20 +212,53 @@ class QwenRealtimeProvider:
                     await self._events.put(ProviderEvent("speech_started"))
                 elif event_type == "input_audio_buffer.speech_stopped":
                     await self._events.put(ProviderEvent("speech_stopped"))
+                elif event_type == "session.updated":
+                    self._session_updated.set()
                 elif event_type == "response.created":
-                    await self._events.put(ProviderEvent("audio_started"))
+                    response = message.get("response") or {}
+                    self._response_id = (
+                        self._pending_response_id
+                        or response.get("id")
+                        or message.get("response_id")
+                    )
+                    await self._events.put(
+                        ProviderEvent("audio_started", response_id=self._response_id)
+                    )
                 elif event_type == "response.audio_transcript.done":
                     await self._events.put(
-                        ProviderEvent("assistant_text", text=message.get("transcript", ""))
+                        ProviderEvent(
+                            "assistant_text",
+                            text=message.get("transcript", ""),
+                            response_id=self._response_id,
+                        )
                     )
                 elif event_type == "response.audio.delta":
                     raw_audio = message.get("delta", "")
                     if raw_audio:
                         await self._events.put(
-                            ProviderEvent("audio_pcm", pcm=base64.b64decode(raw_audio))
+                            ProviderEvent(
+                                "audio_pcm",
+                                pcm=base64.b64decode(raw_audio),
+                                response_id=self._response_id,
+                            )
                         )
                 elif event_type == "response.done":
-                    await self._events.put(ProviderEvent("audio_done"))
+                    response = message.get("response") or {}
+                    status = response.get("status") or message.get("status")
+                    await self._events.put(
+                        ProviderEvent(
+                            "response_done",
+                            response_id=(self._pending_response_id or response.get("id") or self._response_id),
+                            status=status,
+                            error_code=(
+                                "MODEL_RESPONSE_INVALID"
+                                if status != "completed"
+                                else None
+                            ),
+                        )
+                    )
+                    self._pending_response_id = None
+                    self._response_id = None
                 elif event_type == "error":
                     error = message.get("error") or {}
                     await self._events.put(
@@ -219,6 +266,7 @@ class QwenRealtimeProvider:
                             "error",
                             error_code="MODEL_UNAVAILABLE",
                             error_message="provider error",
+                            response_id=self._response_id,
                         )
                     )
         except asyncio.CancelledError:

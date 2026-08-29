@@ -107,3 +107,58 @@ def test_readiness_fails_closed_without_provider_configuration() -> None:
     app = create_realtime_app(settings=_settings(provider_enabled=False))
     client = TestClient(app)
     assert client.get("/ready").status_code == 503
+
+
+def test_production_entrypoint_registers_realtime_route() -> None:
+    from server.gateway.main import app as production_app
+    from server.gateway.main import create_production_app
+
+    app = create_production_app(settings=_settings())
+    paths = {route.path for route in app.routes if hasattr(route, "path")}
+    assert "/v1/realtime-sessions:stream" in paths
+    production_paths = {route.path for route in production_app.routes if hasattr(route, "path")}
+    assert "/v1/realtime-sessions:stream" in production_paths
+    assert "/v1/agent-model:stream" in production_paths
+
+
+def test_unready_production_entrypoint_rejects_before_provider_construction() -> None:
+    calls = 0
+
+    def provider_factory():
+        nonlocal calls
+        calls += 1
+        raise AssertionError("provider must not be constructed while unready")
+
+    from server.gateway.main import create_production_app
+
+    app = create_production_app(
+        settings=_settings(provider_enabled=False),
+        provider_factory=provider_factory,
+    )
+    assert app.state.owners.active == 0
+    assert calls == 0
+
+
+def test_unready_websocket_is_rejected_before_provider_factory() -> None:
+    calls = 0
+
+    def provider_factory():
+        nonlocal calls
+        calls += 1
+        raise AssertionError("provider must not be constructed")
+
+    app = create_realtime_app(
+        settings=_settings(provider_enabled=False),
+        provider_factory=provider_factory,
+    )
+    client = TestClient(app)
+    try:
+        with client.websocket_connect(
+            "/v1/realtime-sessions:stream",
+            headers={"authorization": "Bearer local"},
+            subprotocols=["nomacook.ai-realtime.v1"],
+        ):
+            raise AssertionError("unready websocket unexpectedly accepted")
+    except Exception as exc:
+        assert "4503" in str(exc) or getattr(exc, "code", None) == 4503
+    assert calls == 0

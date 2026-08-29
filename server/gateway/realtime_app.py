@@ -128,6 +128,9 @@ def create_realtime_app(
 
     @app.websocket("/v1/realtime-sessions:stream")
     async def realtime_stream(websocket: WebSocket) -> None:
+        if not settings.ready or not app.state.codec_ready:
+            await websocket.close(code=4503)
+            return
         if not verify_service_bearer(
             websocket.headers.get("authorization"), settings.service_token
         ):
@@ -167,9 +170,11 @@ def create_realtime_app(
             await _send_pending(websocket, session)
 
             async def send_loop() -> None:
-                while not session.closed:
+                while True:
                     await session.wait_for_output()
                     await _send_pending(websocket, session)
+                    if session.closed:
+                        return
 
             sender_task = asyncio.create_task(send_loop(), name="realtime-sender")
             provider_task = asyncio.create_task(
@@ -199,6 +204,9 @@ def create_realtime_app(
                     await provider_task
             if session is not None:
                 await session.close()
+                with contextlib.suppress(Exception):
+                    if websocket.client_state.name == "CONNECTED":
+                        await _send_pending(websocket, session)
             if key is not None:
                 app.state.owners.remove(key)
 
@@ -206,10 +214,11 @@ def create_realtime_app(
 
 
 async def _send_pending(websocket: WebSocket, session: RealtimeSession) -> None:
-    for event in await session.drain_events():
-        await websocket.send_text(event.model_dump_json())
-    for frame in await session.drain_audio():
-        await websocket.send_bytes(frame)
+    for kind, item in await session.drain_outbound():
+        if kind == "text":
+            await websocket.send_text(item.model_dump_json())
+        else:
+            await websocket.send_bytes(item)
 
 
 def _codec_available(factory: Callable[[], OpusCodec]) -> bool:

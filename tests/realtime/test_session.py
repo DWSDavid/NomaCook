@@ -78,6 +78,7 @@ class FakeProvider:
 
     async def announce(self, payload: dict[str, Any]) -> None:
         self.announces.append(payload)
+        return f"response-{len(self.announces)}"
 
     async def cancel_response(self) -> None:
         self.cancel_count += 1
@@ -112,10 +113,10 @@ def test_session_start_vad_audio_events_and_codec_output() -> None:
         await session.handle_provider_event(ProviderEvent("speech_stopped"))
         await session.handle_provider_event(ProviderEvent("assistant_text", text="继续。"))
         codec = OpusCodec()
-        pcm24 = (np.zeros(480, dtype=np.int16) + 1000).tobytes()
+        pcm24 = (np.zeros(960, dtype=np.int16) + 1000).tobytes()
         await session.handle_provider_event(ProviderEvent("audio_started"))
         await session.handle_provider_event(ProviderEvent("audio_pcm", pcm=pcm24))
-        await session.handle_provider_event(ProviderEvent("audio_done"))
+        await session.handle_provider_event(ProviderEvent("response_done", status="completed"))
         events = await session.drain_events()
         assert [e.message_type for e in events] == [
             "input.speech_started",
@@ -126,10 +127,75 @@ def test_session_start_vad_audio_events_and_codec_output() -> None:
             "response.audio_done",
         ]
         audio = await session.drain_audio()
-        assert len(audio) == 1
-        parsed = BinaryAudioFrame.from_bytes(audio[0])
-        assert parsed.kind == "output_opus"
-        assert parsed.packet_sequence == 1
+        assert len(audio) == 2
+        parsed = [BinaryAudioFrame.from_bytes(frame) for frame in audio]
+        assert [frame.kind for frame in parsed] == ["output_opus", "output_opus"]
+        assert [frame.packet_sequence for frame in parsed] == [1, 2]
+
+        outbound = await session.drain_outbound()
+        assert [kind for kind, _ in outbound] == [
+            "text", "text", "text", "text", "text", "bytes", "bytes", "text"
+        ]
+
+
+def test_session_ready_waits_for_provider_session_updated() -> None:
+    async def run() -> None:
+        provider = FakeProvider()
+        gate = asyncio.Event()
+
+        async def delayed_start(*, semantic_vad: bool, context: dict[str, Any]) -> None:
+            provider.started = True
+            provider.semantic_vad = semantic_vad
+            await gate.wait()
+
+        provider.start = delayed_start  # type: ignore[method-assign]
+        session = RealtimeSession(SESSION_ID, 1, provider=provider)
+        task = asyncio.create_task(session.handle_text(_start()))
+        await asyncio.sleep(0)
+        assert await session.drain_events() == []
+        gate.set()
+        await task
+        events = await session.drain_events()
+        assert [event.message_type for event in events] == ["session.ready"]
+
+    _run(run())
+
+
+def test_outbound_queue_keeps_audio_started_before_frames_and_done_after() -> None:
+    async def run() -> None:
+        provider = FakeProvider()
+        session = RealtimeSession(SESSION_ID, 1, provider=provider)
+        await session.handle_text(_start())
+        await session.drain_outbound()
+        await session.handle_provider_event(ProviderEvent("audio_started", response_id="r1"))
+        await session.handle_provider_event(
+            ProviderEvent("audio_pcm", pcm=(np.zeros(960, dtype=np.int16) + 1000).tobytes(), response_id="r1")
+        )
+        await session.handle_provider_event(ProviderEvent("response_done", status="completed", response_id="r1"))
+        outbound = await session.drain_outbound()
+        assert [kind for kind, _ in outbound] == ["text", "bytes", "bytes", "text"]
+        assert [item.message_type for kind, item in outbound if kind == "text"] == [
+            "response.audio_started",
+            "response.audio_done",
+        ]
+
+    _run(run())
+
+
+def test_pause_discards_unplayed_output_audio() -> None:
+    async def run() -> None:
+        provider = FakeProvider()
+        session = RealtimeSession(SESSION_ID, 1, provider=provider)
+        await session.handle_text(_start())
+        await session.drain_outbound()
+        await session.handle_provider_event(ProviderEvent("audio_started"))
+        await session.handle_provider_event(
+            ProviderEvent("audio_pcm", pcm=(np.zeros(480, dtype=np.int16) + 1000).tobytes())
+        )
+        await session.handle_text(_envelope("session.pause", {}, seq=2))
+        assert all(kind != "bytes" for kind, _ in await session.drain_outbound())
+
+    _run(run())
 
     _run(run())
 
@@ -167,6 +233,12 @@ def test_interruption_announce_idempotency_and_backpressure() -> None:
         await session.handle_text(_envelope("announce", announce, seq=2))
         await session.handle_text(_envelope("announce", announce, seq=3))
         assert len(provider.announces) == 1
+        pre_audio = await session.drain_events()
+        assert all(event.message_type != "announce.completed" for event in pre_audio)
+        provider = FakeProvider()
+        session = RealtimeSession(SESSION_ID, 1, provider=provider, max_output_frames=1)
+        await session.handle_text(_start(max_buffered_audio_ms=20))
+        await session.drain_events()
         await session.handle_provider_event(ProviderEvent("speech_started"))
         await session.handle_provider_event(ProviderEvent("audio_started"))
         pcm = (np.zeros(480, dtype=np.int16) + 1000).tobytes()
@@ -177,5 +249,66 @@ def test_interruption_announce_idempotency_and_backpressure() -> None:
         assert "response.interrupted" in [e.message_type for e in events]
         assert provider.cancel_count == 1
         assert any(e.message_type == "session.failed" and e.payload.get("code") == "BACKPRESSURE" for e in events)
+
+    _run(run())
+
+
+def test_announce_releases_audio_only_after_exact_transcript_and_terminal() -> None:
+    async def run() -> None:
+        provider = FakeProvider()
+        session = RealtimeSession(SESSION_ID, 1, provider=provider)
+        await session.handle_text(_start())
+        await session.drain_events()
+        payload = {"utterance_id": "u1", "message_ref": "m1", "text": "继续翻炒", "deadline_at": "2026-08-29T10:00:15Z"}
+        await session.handle_text(_envelope("announce", payload, seq=2))
+        assert await session.drain_events() == []
+        pcm = (np.zeros(480, dtype=np.int16) + 1000).tobytes()
+        await session.handle_provider_event(ProviderEvent("assistant_text", text="继续翻炒", response_id="response-1"))
+        await session.handle_provider_event(ProviderEvent("audio_started", response_id="response-1"))
+        await session.handle_provider_event(ProviderEvent("audio_pcm", pcm=pcm, response_id="response-1"))
+        assert await session.drain_audio() == []
+        await session.handle_provider_event(ProviderEvent("response_done", status="completed", response_id="response-1"))
+        events = await session.drain_events()
+        assert events[-1].message_type == "announce.completed"
+        audio = await session.drain_audio()
+        assert len(audio) == 1
+
+    _run(run())
+
+
+def test_announce_mismatch_or_failed_response_discards_audio() -> None:
+    async def run() -> None:
+        for status, transcript in (("completed", "改写后的内容"), ("failed", "继续翻炒")):
+            provider = FakeProvider()
+            session = RealtimeSession(SESSION_ID, 1, provider=provider)
+            await session.handle_text(_start())
+            await session.drain_events()
+            payload = {"utterance_id": "u1", "message_ref": "m1", "text": "继续翻炒", "deadline_at": "2026-08-29T10:00:15Z"}
+            await session.handle_text(_envelope("announce", payload, seq=2))
+            await session.handle_provider_event(ProviderEvent("assistant_text", text=transcript, response_id="response-1"))
+            await session.handle_provider_event(ProviderEvent("audio_started", response_id="response-1"))
+            await session.handle_provider_event(ProviderEvent("audio_pcm", pcm=(np.zeros(480, dtype=np.int16) + 1000).tobytes(), response_id="response-1"))
+            await session.handle_provider_event(ProviderEvent("response_done", status=status, response_id="response-1"))
+            events = await session.drain_events()
+            assert events[-1].message_type == "announce.failed"
+            assert await session.drain_audio() == []
+
+    _run(run())
+
+
+def test_failed_or_incomplete_response_done_never_emits_audio_done() -> None:
+    async def run() -> None:
+        for status, pcm in (("failed", b"\x00\x00" * 480), ("completed", b"\x00\x00" * 240)):
+            provider = FakeProvider()
+            session = RealtimeSession(SESSION_ID, 1, provider=provider)
+            await session.handle_text(_start())
+            await session.drain_events()
+            await session.handle_provider_event(ProviderEvent("audio_started", response_id="r1"))
+            await session.handle_provider_event(ProviderEvent("audio_pcm", pcm=pcm, response_id="r1"))
+            await session.handle_provider_event(ProviderEvent("response_done", status=status, response_id="r1"))
+            events = await session.drain_events()
+            assert events[-1].message_type == "session.failed"
+            assert all(event.message_type != "response.audio_done" for event in events)
+            assert await session.drain_audio() == []
 
     _run(run())
