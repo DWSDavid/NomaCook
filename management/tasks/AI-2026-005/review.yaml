@@ -1,0 +1,18 @@
+schema_version: 1
+task_id: "AI-2026-005"
+review_status: "pending"
+review_result: "not-reviewed"
+review_mode: "MVP-initial-review"
+review_base_commit: "d8e68742d1cc3730dc19f097ad90a2d585b2e40a"
+reviewed_head_commit: null
+reviewed_implementation_head: null
+management_revision: "6d5d088d57e558277c858926b8497140151d9f85"
+contract_revision: "6d5d088d57e558277c858926b8497140151d9f85"
+review_scope:
+  - "AI-2026-005 allowed production paths and direct CONTRACT-AI-REALTIME-001 v1 codec, transport, event and lifecycle invariants."
+findings: []
+required_changes: []
+resolved_findings: []
+external_dependencies:
+  - "Backend, Hardware, App and final Integration remain separate tasks."
+non_blocking_backlog: []
