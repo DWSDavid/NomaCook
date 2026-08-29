@@ -4,6 +4,16 @@ Execute `task.yaml` against the approved Realtime contract. Start with strict co
 
 Do not read `config.yaml`, call Qwen, open local microphone/speaker, start other services, or add business Tool logic. Stop after focused GREEN and two commits for Manager Review.
 
+## Closed P0 Delta Handoff — 2026-08-29
+
+- 实现/测试 Commit：`7c6e9ae29d80b7fb01c311d530cbac4c48863a1a`。
+- 生产 Uvicorn 入口现在注册 Realtime routes，并在 Provider 构造前执行 readiness gate。
+- Provider 等待 `session.updated`；PCM delta 累积后切分严格 20ms，统一 outbound queue 保证音频顺序。
+- `response.done` failed/incomplete fail-closed；announce 以唯一 response correlation，只有授权文本精确匹配且音频完整后才 `announce.completed`。
+- `tests/realtime` `29 passed / 0 skipped`；`tests/model_service` `66 passed / 0 skipped`；真实 Provider calls=0。
+- 当前状态：`machine-complete / manager-review-pending / integration-pending`，等待同任务封闭式 Manager Delta Review。
+- `?? .gitkeep` 与 `?? config.yaml` 保持原样且未读取；未处理 P1/P2，未启动其他端、未部署、未 push、未 merge。
+
 ## Executor Handoff — 2026-08-29
 
 状态：`machine-complete / manager-review-pending / integration-pending`。

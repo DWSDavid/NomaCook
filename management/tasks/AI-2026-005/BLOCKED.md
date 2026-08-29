@@ -8,5 +8,9 @@ Current blockers:
 
 真实 Qwen、Backend、Node、App、Hardware 和物理设备属于后续 Integration，不是本任务机器层完成条件。
 
+原始 Review 的三个 P0 已在同一任务分支完成封闭式 Delta；当前无新增机器层阻塞，等待 Manager
+复审。真实 Qwen、Backend/Node/App/Hardware、Pi WebRTC 和物理验收继续保持
+`integration-pending / physical-validation-pending`，不在本任务执行。
+
 All reproduce within the allowed machine scope and must be fixed in one closed
 Delta. Real Qwen and cross-end physical work remain integration pending.

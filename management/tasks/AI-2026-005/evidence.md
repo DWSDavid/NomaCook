@@ -9,6 +9,47 @@
 
 Executor must append RED/GREEN commands, exit codes, test counts, dependency changes, privacy audit and full implementation/evidence SHAs.
 
+## Closed P0 Delta Evidence — 2026-08-29
+
+### Authority and scope
+
+- Branch：`codex/ai-realtime-model-service-v1`。
+- Opening HEAD：`5def6fdf39e234b579852061d076944b96b8dd57`；reviewed implementation
+  `1d43f615470a7431e95afad2c9ac807fcecd1fe0` 为祖先；任务基线
+  `d8e68742d1cc3730dc19f097ad90a2d585b2e40a` 仍在祖先链。
+- 未修改 `task.yaml`、`review.yaml` 或 `CONTRACT-AI-REALTIME-001`；未读取、修改、移动、暂存、提交、忽略或删除 `config.yaml`、`.gitkeep`。
+- Delta 仅修改 `server/gateway/**`、`server/realtime/**`、`tests/realtime/**`。
+
+### Root-cause RED
+
+- 生产入口：`pytest tests/realtime/test_app.py -q` 在修复前 `2 failed / 2 passed`，因
+  `server.gateway.main` 没有生产 `create_production_app`，Realtime route 未注册。
+- Realtime session：`pytest tests/realtime/test_app.py tests/realtime/test_session.py -q` 在修复前
+  `3 failed / 8 passed`，复现 announce 提前完成、40ms PCM/response_done 未覆盖以及新增事件类型缺失。
+- 已用 Fake Provider/no-write probes 确认根因：旧入口只构造 Agent Model app；session 直接按单个 PCM delta 编码并分离 drain events/audio；announce 在 Provider write 后立即 completed。
+
+### GREEN and implementation
+
+- `server/gateway/main.py` 现在构造单一生产 FastAPI app，保留已有 Agent Model route，同时注册 Realtime `/v1/realtime-sessions:stream`；未 ready 时在 Provider factory 前拒绝 WebSocket。
+- Qwen provider 等待 matching `session.updated` 后才报告 ready；`response.done` 的 failed/incomplete status 映射为固定失败。
+- Realtime session 累积任意 PCM delta，按 20ms PCM 帧编码；统一 outbound queue 保证
+  `response.audio_started → binary output_opus → response.audio_done`。
+- announce 绑定唯一 provider response，缓存 transcript/音频至终态；只有 transcript 与 Backend 授权文本完全一致且存在完整音频时才释放并发送 `announce.completed`，否则丢弃并发送 `announce.failed`。
+- Implementation/test Commit：`7c6e9ae29d80b7fb01c311d530cbac4c48863a1a`。
+
+### Final verification
+
+- `./.venv/bin/python -m pytest tests/realtime -q`：`29 passed / 0 skipped`，exit `0`。
+- `./.venv/bin/python -m pytest tests/model_service -q`：`66 passed / 0 skipped`，exit `0`。
+- `./.venv/bin/python -m compileall -q server/realtime server/gateway`：exit `0`。
+- `git diff --check`：exit `0`。
+- Production-path scan：未发现 `sounddevice`、`RawInputStream`、`RawOutputStream`、session file write；codec 的 `codec.open()` 仅为 PyAV codec context 初始化。
+- Privacy/forbidden scan：无凭据、私钥、完整 token、config 读取或跨域模块匹配。
+- 最终 `git status --short` 仅为 `?? .gitkeep`、`?? config.yaml`。
+- 真实 Qwen Provider calls：`0`；未启动 Backend、Node、App、Hardware，未部署、push 或 merge。
+
+状态：`machine-complete / manager-review-pending / integration-pending`。
+
 ## Executor Evidence — 2026-08-29
 
 ### Baseline and privacy
