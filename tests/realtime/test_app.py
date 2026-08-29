@@ -6,6 +6,7 @@ from typing import AsyncIterator
 
 from fastapi.testclient import TestClient
 
+from server.gateway.app import ServiceSettings
 from server.gateway.realtime_app import RealtimeSettings, create_realtime_app
 from server.realtime.provider import ProviderEvent
 
@@ -59,6 +60,20 @@ def _settings(**overrides) -> RealtimeSettings:
     }
     values.update(overrides)
     return RealtimeSettings(**values)
+
+
+def _agent_settings(*, ready: bool) -> ServiceSettings:
+    return ServiceSettings(
+        service_token="agent",
+        max_concurrency=1,
+        request_timeout_ms=1000,
+        qwen_enabled=ready,
+        qwen_api_key="agent-key" if ready else "",
+        qwen_workspace_id="agent-workspace" if ready else "",
+        qwen_model="qwen3.6-flash" if ready else "",
+        host="127.0.0.1",
+        port=8090,
+    )
 
 
 def _start() -> dict:
@@ -162,3 +177,43 @@ def test_unready_websocket_is_rejected_before_provider_factory() -> None:
     except Exception as exc:
         assert "4503" in str(exc) or getattr(exc, "code", None) == 4503
     assert calls == 0
+
+
+def test_combined_ready_requires_agent_and_realtime_ready() -> None:
+    from server.gateway.main import create_production_app
+
+    cases = [
+        (_agent_settings(ready=False), _settings(), 503),
+        (_agent_settings(ready=True), _settings(provider_enabled=False), 503),
+        (_agent_settings(ready=True), _settings(), 200),
+    ]
+    for agent_settings, realtime_settings, expected in cases:
+        provider_calls = 0
+
+        def provider_factory():
+            nonlocal provider_calls
+            provider_calls += 1
+            raise AssertionError("readiness must not construct Provider")
+
+        app = create_production_app(
+            settings=realtime_settings,
+            agent_settings=agent_settings,
+            agent_service=object(),
+            provider_factory=provider_factory,
+        )
+        client = TestClient(app)
+        assert client.get("/ready").status_code == expected
+        assert provider_calls == 0
+
+
+def test_combined_production_keeps_agent_and_realtime_routes() -> None:
+    from server.gateway.main import create_production_app
+
+    app = create_production_app(
+        settings=_settings(),
+        agent_settings=_agent_settings(ready=True),
+        agent_service=object(),
+    )
+    paths = {route.path for route in app.routes if hasattr(route, "path")}
+    assert "/v1/agent-model:stream" in paths
+    assert "/v1/realtime-sessions:stream" in paths
