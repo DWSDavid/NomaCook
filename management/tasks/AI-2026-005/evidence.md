@@ -44,3 +44,21 @@ Executor must append RED/GREEN commands, exit codes, test counts, dependency cha
 - Implementation/test Commit：`e12188b3817373e3effdc71703364d20b9f15372`。
 - 未调用真实 Qwen；Fake Provider/ASGI client only；未启动 Backend、Node、App、Hardware；未部署、push 或 merge。
 - 当前状态：`machine-complete / manager-review-pending / integration-pending`。
+
+## Manager Initial Review
+
+- Activation/implementation ancestry and allowed-path Delta passed; reviewed
+  Head is `1d43f615470a7431e95afad2c9ac807fcecd1fe0` and implementation is
+  `e12188b3817373e3effdc71703364d20b9f15372`.
+- Production route probe: `PRODUCTION_REALTIME_ROUTE_PRESENT=false`.
+- Announce probe: `ANNOUNCE_EVENTS_BEFORE_AUDIO=announce.completed`.
+- Wire-order probe:
+  `SEND_PENDING_ORDER=response.audio_started,response.audio_done,binary_audio`.
+- Incremental audio probe: a valid 40 ms PCM fragment produced
+  `session.failed:CODEC_UNAVAILABLE` and zero output frames.
+- Official Qwen Server Events documentation confirms `session.updated` is the
+  successful update acknowledgement and `response.audio.delta` is incremental
+  PCM without a contract-fixed 20 ms event size.
+- Manager did not read private files, modify production code, call a Provider,
+  start services or repeat the executor suites.
+- Result: `blocked-by-P0`; one closed Delta owns all three findings.

@@ -2,7 +2,7 @@ schema_version: 1
 task_id: "AI-2026-005"
 initiative_id: "INIT-2026-004"
 domain: "ai"
-status: ready
+status: blocked
 risk_level: "high"
 management_revision: "6d5d088d57e558277c858926b8497140151d9f85"
 contract_revision: "6d5d088d57e558277c858926b8497140151d9f85"
@@ -47,6 +47,9 @@ required_checks:
   - "RED then minimum GREEN for contract parsing, real codec roundtrip, event order, pause/stop, interruption, stale generation, backpressure and readiness"
   - "0 skip; run only model-service/realtime focused tests, compileall, diff-check, allowed-path and privacy scans"
   - "submit one implementation/test commit and one sanitized evidence commit, then stop for Manager Review"
+  - "P0-001: mount/register the Realtime WebSocket in the production AI Model Service entrypoint and reject WebSocket admission while Realtime readiness is false"
+  - "P0-002: wait for provider session.updated before session.ready, normalize arbitrary incremental PCM into 20 ms frames, preserve text/binary/done wire order, and map failed/incomplete response.done to failure"
+  - "P0-003: announce.completed is allowed only after correlated audio completes and the final transcript exactly matches the Backend-authorized text; otherwise discard buffered announce audio and emit announce.failed"
   - "do not start Backend/Node/App/Hardware, deploy, push or merge"
 required_human_approvals: 1
 design_ref: "nomacook-workspace:docs/superpowers/specs/2026-08-29-nomacook-realtime-ai-cooking-mvp-design.md@6d5d088d57e558277c858926b8497140151d9f85"

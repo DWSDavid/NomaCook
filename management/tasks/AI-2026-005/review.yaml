@@ -1,18 +1,44 @@
 schema_version: 1
 task_id: "AI-2026-005"
-review_status: "pending"
-review_result: "not-reviewed"
+review_status: "changes_requested"
+review_result: "blocked-by-P0 / integration-pending"
 review_mode: "MVP-initial-review"
 review_base_commit: "d8e68742d1cc3730dc19f097ad90a2d585b2e40a"
-reviewed_head_commit: null
-reviewed_implementation_head: null
+reviewed_head_commit: "1d43f615470a7431e95afad2c9ac807fcecd1fe0"
+reviewed_implementation_head: "e12188b3817373e3effdc71703364d20b9f15372"
 management_revision: "6d5d088d57e558277c858926b8497140151d9f85"
 contract_revision: "6d5d088d57e558277c858926b8497140151d9f85"
 review_scope:
   - "AI-2026-005 allowed production paths and direct CONTRACT-AI-REALTIME-001 v1 codec, transport, event and lifecycle invariants."
-findings: []
-required_changes: []
+findings:
+  - id: "P0-AI-2026-005-001"
+    owner: "ai-executor"
+    file: "server/gateway/main.py:7; server/gateway/realtime_app.py:95"
+    trigger: "The reviewed AI service is started through its production `python -m server.gateway.main` entrypoint and Backend opens `/v1/realtime-sessions:stream`."
+    impact: "The production app still constructs only `create_app`; the new WebSocket exists only in an unreferenced factory, so every Backend Realtime connection is unavailable despite focused TestClient tests passing."
+    contract: "CONTRACT-AI-REALTIME-001 v1 sections 3 and 13 require the authenticated WebSocket and fail-closed readiness in the production AI Model Service."
+    evidence: "Manager no-write route probe returned PRODUCTION_REALTIME_ROUTE_PRESENT=false; repository search found no production reference to create_realtime_app."
+  - id: "P0-AI-2026-005-002"
+    owner: "ai-executor"
+    file: "server/realtime/session.py:172; server/gateway/realtime_app.py:208; server/realtime/provider.py:201"
+    trigger: "Qwen emits an incremental PCM delta whose byte length is not exactly one 20 ms frame, or several provider events queue before the WebSocket sender drains them."
+    impact: "A valid 40 ms delta becomes CODEC_UNAVAILABLE with zero output; queued `response.audio_done` is sent before binary audio because events and audio use separate drains, so Backend can close playback before receiving audio. Provider readiness and failed response terminals are also reported as normal success too early."
+    contract: "CONTRACT-AI-REALTIME-001 v1 sections 2, 6 and 7 require 20 ms output normalization, session.ready only after provider initialization, and strict audio_started → binary audio → audio_done ordering."
+    evidence: "Manager no-write probes returned FORTY_MS_DELTA_EVENTS=response.audio_started,session.failed:CODEC_UNAVAILABLE; FORTY_MS_OUTPUT_FRAMES=0; SEND_PENDING_ORDER=response.audio_started,response.audio_done,binary_audio. Official Qwen documentation defines response.audio.delta only as incremental Base64 PCM and session.updated as the successful session.update acknowledgement."
+  - id: "P0-AI-2026-005-003"
+    owner: "ai-executor"
+    file: "server/realtime/session.py:264; server/realtime/provider.py:144"
+    trigger: "Backend sends an Agent `announce`; the provider write succeeds but no model audio has yet returned, or the model paraphrases/fails."
+    impact: "AI Service immediately emits announce.completed before any transcript or audio, while the Provider submits the authoritative text as a user message without correlation or exact-output validation. Backend/App/Hardware can therefore report a spoken message that was never played or whose content differs."
+    contract: "CONTRACT-AI-REALTIME-001 v1 sections 5.3, 7 and 9 require unchanged Backend text, correlated audio and truthful completion."
+    evidence: "Manager no-write probe returned ANNOUNCE_EVENTS_BEFORE_AUDIO=announce.completed."
+required_changes:
+  - "Integrate Realtime routes and settings into the single production FastAPI/Uvicorn app; `/ready` and WebSocket admission must fail before provider construction/call when Realtime config or codec is unavailable."
+  - "Wait for matching `session.updated`; emit audio_started on first real audio delta, buffer arbitrary PCM deltas into exact 20 ms frames, flush the final partial frame safely, and replace split event/audio drains with one ordered outbound queue so audio_done follows the final binary frame."
+  - "Inspect `response.done.status` and map failed/incomplete/content-filter terminals to fixed failures instead of audio_done."
+  - "Correlate announce to one provider response, buffer its transcript/audio until terminal, require exact transcript equality to the authorized text, then release audio and announce.completed; mismatch/error/timeout emits announce.failed with no announce audio."
+  - "Add RED/GREEN tests against the production entrypoint, 40 ms and fragmented deltas, exact WebSocket frame ordering, session.updated/error, failed response.done and announce success/mismatch/no-audio. Preserve zero real Provider calls."
 resolved_findings: []
 external_dependencies:
-  - "Backend, Hardware, App and final Integration remain separate tasks."
+  - "Backend, Hardware, App and final Integration remain separate tasks; all three P0s reproduce locally with no external dependency."
 non_blocking_backlog: []

@@ -21,4 +21,10 @@ Status: `ready / execution-pending`.
 - PyAV 实际 Opus roundtrip 通过 20ms 音频边界、48kHz/2ch↔16kHz/mono 和 24kHz/mono→48kHz/2ch；Fake Provider 覆盖 VAD、assistant text/audio、announce、pause/stop、interrupt、generation、backpressure。
 - 实现/测试 Commit：`e12188b3817373e3effdc71703364d20b9f15372`。
 
-当前状态：`machine-complete / manager-review-pending / integration-pending`。
+当前状态：`blocked-by-P0 / manager-delta-review-pending / integration-pending`。
+
+Manager initial Review found three complete-path P0s: the production Uvicorn
+entrypoint does not expose the Realtime app; arbitrary Provider PCM deltas and
+the split event/audio drains break the required wire order; and announce is
+reported completed before correlated audio/text exists. One closed Delta must
+fix all three in this task. No other scope is reopened.
