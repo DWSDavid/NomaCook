@@ -19,6 +19,17 @@ either Agent Model Service or Realtime is unready and 200 only when both are
 ready; retain both production routes and Provider calls 0. Submit implementation
 and evidence commits, then stop for final Delta Review.
 
+## Final Readiness-only Delta Handoff — 2026-08-29
+
+- Opening HEAD：`2ca5605949b2ca07d97954fb78b53858c631c6d5`。
+- Implementation/test Commit：`ae872c00c51a5f2252a616ab95aeee2340a9e3ce`。
+- 组合生产 `/ready` 已收口为 Agent Model ready、Realtime ready 与 codec ready 的 AND
+  门禁；三组合结果固定为 `503/503/200`，两组生产路由保留，Provider calls `0`。
+- 回归：`tests/realtime` `31 passed / 0 skipped`；`tests/model_service`
+  `66 passed / 0 skipped`；compileall 与 diff 检查通过。
+- 证据 Commit 提交后停止，等待 Manager final Delta Review；不读取或处理
+  `config.yaml`、`.gitkeep`，不调用真实 Qwen，不启动其他端，不部署、push 或 merge。
+
 ## Executor Handoff — 2026-08-29
 
 状态：`machine-complete / manager-review-pending / integration-pending`。

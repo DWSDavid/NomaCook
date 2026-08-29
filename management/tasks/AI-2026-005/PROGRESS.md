@@ -25,6 +25,25 @@ introduced by production composition remains: combined `/ready` reports 200
 when Realtime is ready but the retained Agent Model Service is absent. Fix only
 that readiness invariant.
 
+## Final Readiness-only Delta — 2026-08-29
+
+- Opening HEAD：`2ca5605949b2ca07d97954fb78b53858c631c6d5`；implementation/test
+  commit：`ae872c00c51a5f2252a616ab95aeee2340a9e3ce`；opening HEAD remains an
+  ancestor；`task.yaml/review.yaml` 未修改。
+- RED：`./.venv/bin/python -m pytest tests/realtime/test_app.py -q`，exit `1`，
+  `2 failed / 5 passed`；失败原因是组合生产入口尚未接收 Agent readiness 参数。
+- GREEN：同一命令 `7 passed / 0 skipped`，exit `0`。新增断言覆盖 Realtime ready +
+  Agent unready → `503`、Agent ready + Realtime unready → `503`、双方 ready →
+  `200`，并确认 Provider factory calls `0`；同时保留 Agent Model 与 Realtime
+  两条生产路由。
+- 回归：`tests/realtime` `31 passed / 0 skipped`，`tests/model_service`
+  `66 passed / 0 skipped`，均 exit `0`；`compileall -q server/realtime
+  server/gateway` 与 `git diff --check` 均 exit `0`。
+- 生产路径未打开本机音频设备或写会话文件；未读取、修改、移动、暂存、提交、忽略或删除
+  `config.yaml`、`.gitkeep`；未调用真实 Provider、未启动其他端、未部署、未 push、未 merge。
+
+当前状态：`machine-complete / manager-final-delta-review-pending / integration-pending`。
+
 ## Executor Verification — 2026-08-29
 
 - 接管盘点：AI 仓库 `codex/ai-realtime-model-service-v1`，HEAD

@@ -114,3 +114,45 @@ Executor must append RED/GREEN commands, exit codes, test counts, dependency cha
 - Manager did not read private files, modify production code, call a Provider,
   start services or repeat the executor suites.
 - Result: `blocked-by-P0`; one closed Delta owns all three findings.
+
+## Final Readiness-only Delta Evidence — 2026-08-29
+
+### Authority and scope
+
+- Branch：`codex/ai-realtime-model-service-v1`。
+- Opening HEAD：`2ca5605949b2ca07d97954fb78b53858c631c6d5`；management/contract
+  revision：`6d5d088d57e558277c858926b8497140151d9f85`；opening HEAD is an
+  ancestor of implementation/test commit `ae872c00c51a5f2252a616ab95aeee2340a9e3ce`。
+- 仅修改 `server/gateway/main.py`、`tests/realtime/test_app.py` 及本节允许的
+  脱敏证据文件；未修改 `task.yaml`、`review.yaml` 或契约。
+- `config.yaml` 与 `.gitkeep` 仍保持未跟踪，正文未读取，且未被修改、移动、暂存、提交、
+  忽略或删除。
+
+### Root-cause RED
+
+- `./.venv/bin/python -m pytest tests/realtime/test_app.py -q` 在修复前 exit `1`：
+  `2 failed / 5 passed`；组合测试因生产入口缺少 Agent readiness 注入而无法执行，
+  复现了组合 `/ready` 门禁缺口。
+
+### GREEN and implementation
+
+- `create_production_app` 现在组合 Agent Model 与 Realtime 状态，去重组件 `/health`、`/ready`
+  后提供统一生产 `/health`、`/ready`；统一 readiness 同时检查 Agent settings/service、
+  Realtime settings 和 codec。
+- 新增的三组合测试固定 `503/503/200` 结果，并以 Fake Provider factory 断言 readiness
+  路径 Provider calls `0`；测试同时固定 Agent Model `/v1/agent-model:stream` 与
+  Realtime `/v1/realtime-sessions:stream` 均注册。
+- Implementation/test Commit：`ae872c00c51a5f2252a616ab95aeee2340a9e3ce`。
+
+### Final verification
+
+- `./.venv/bin/python -m pytest tests/realtime/test_app.py -q`：`7 passed / 0 skipped`，exit `0`。
+- `./.venv/bin/python -m pytest tests/realtime -q`：`31 passed / 0 skipped`，exit `0`。
+- `./.venv/bin/python -m pytest tests/model_service -q`：`66 passed / 0 skipped`，exit `0`。
+- `./.venv/bin/python -m compileall -q server/realtime server/gateway`：exit `0`。
+- `git diff --check`：exit `0`。
+- 生产路径扫描未发现 `sounddevice`、`RawInputStream`、`RawOutputStream` 或会话/音频文件写入；
+  凭据/config 扫描未发现 Delta 文件中的私密配置或完整凭据。
+- 真实 Provider calls：`0`；未启动 Backend、Node、App、Hardware，未部署、push 或 merge。
+
+状态：`machine-complete / manager-final-delta-review-pending / integration-pending`。

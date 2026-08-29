@@ -18,3 +18,11 @@ three P0s remain closed.
 
 All reproduce within the allowed machine scope and must be fixed in one closed
 Delta. Real Qwen and cross-end physical work remain integration pending.
+
+## Final Readiness-only Delta — 2026-08-29
+
+`P0-AI-2026-005-004` 已由组合生产入口修复：`/ready` 仅在 Agent Model Service
+ready 且 Realtime ready、codec ready 时返回 `200`，任一未 ready 返回 `503`。
+Agent Model 与 Realtime 生产路由均保留，readiness 检查不构造 Provider；Fake
+Provider calls 为 `0`。当前无新增机器层阻塞，等待 Manager final Delta Review；
+真实 Provider 与跨端/物理联调继续 `integration-pending`。
