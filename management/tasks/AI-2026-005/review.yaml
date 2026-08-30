@@ -1,26 +1,32 @@
 schema_version: 1
 task_id: "AI-2026-005"
-review_status: "pending"
-review_result: "blocked-by-physical-P0-005"
+review_status: "approved"
+review_result: "MVP-review-passed / integration-rerun-pending / physical-validation-pending"
 review_mode: "MVP-closed-delta-review"
 review_base_commit: "dd7ad983ef6502a5d86980f99478742ffc81b7ae"
-management_revision: "5e7db090fcda482716eb0f2ae3cbb6c45be2c33a"
+reviewed_head_commit: "494d82b3c6ce295da4bcf9fb519f2be307bf5d65"
+reviewed_implementation_head: "5a916ebfbfe6dcb6320e80a918a24912017df873"
+management_revision: "41b5da98a383f5e31ef6605a9ee300ed0c2faab0"
 contract_revision: "1249c2e0b6b0d7e367aaec89402c9043b904a044"
 review_scope:
   - "P0-AI-2026-005-005 only: interrupted announce to fresh user response correlation and direct ordered-output invariants."
-findings:
+findings: []
+required_changes: []
+resolved_findings:
   - id: "P0-AI-2026-005-005"
-    status: "open"
-    trigger: "Physical user speech interrupted active announce; announce failed but the user turn produced no normal response."
-    owner: "server/realtime provider/session response correlation"
-required_changes:
-  - "Separate cancelled announce response ownership from the following semantic-VAD user response and prove ordered normal output once."
-resolved_findings: []
+    status: "closed"
+    resolution: "Interrupted announce response IDs are quarantined; late terminal/audio events are dropped and the following user response receives a fresh utterance owner with one ordered output sequence."
 external_dependencies:
-  - "Physical rerun waits for AI and App Deltas plus combined Review."
+  - "APP-2026-014 P0-002 remains in execution before the overlap Gate rerun."
+  - "Real Provider and Pi/iPhone audio validation remain physical-validation-pending."
 non_blocking_backlog: []
-verification_accepted: []
+verification_accepted:
+  - "Executor RED reproduced stale announce terminal/audio contaminating the following response owner."
+  - "Focused GREEN passed 1/1; Realtime passed 40/40 and Model Service passed 66/66 with zero skips and Fake Provider calls 0."
+  - "compileall, diff-check, allowed-path and privacy checks passed; config.yaml and .gitkeep remained untouched and unread."
 verification_performed_by_manager:
-  - "Physical projection order and absence of playback begin localize the first failure before Hardware."
-remaining_state: "blocked-by-P0 / machine-delta-pending / physical-validation-pending"
-next_review: "Review only P0-005 changed paths and direct invariants after full Fake-Provider GREEN."
+  - "Static closed-Delta review checked only session.py, the new focused test and direct response/announce ownership invariants."
+  - "Confirmed stale response filtering occurs before provider event dispatch, announce utterance IDs cannot be reused by the next normal response, and duplicate speech_stopped does not duplicate thinking."
+  - "Manager did not rerun suites, read config.yaml, call a Provider, deploy or modify production code."
+remaining_state: "machine-complete / MVP-review-passed / integration-rerun-pending / physical-validation-pending"
+next_review: "No further isolated AI machine Review; retain this candidate while APP-2026-014 P0-002 completes, then rerun only the overlap Gate."

@@ -1,5 +1,9 @@
 # AI-2026-005 Handoff
 
+## 2026-08-31 P0-005 reviewed handoff
+
+Candidate `494d82b3c6ce295da4bcf9fb519f2be307bf5d65` passed the P0-005 closed Delta Review. Freeze AI machine scope. Wait for APP-2026-014 P0-002 to complete, then reuse the existing Integration overlap Runner for one rerun; do not start another AI task or repeat earlier Gates.
+
 ## 2026-08-31 P0-005 next action
 
 Execute one closed Fake-Provider Delta from the Manager activation HEAD. Reproduce active announce → user interruption → cancelled announce terminal → same user speech normal response, then repair response_id/utterance ownership and ordered output. Submit implementation/test and sanitized evidence commits; do not deploy or call real Qwen.

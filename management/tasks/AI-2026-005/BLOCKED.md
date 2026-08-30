@@ -1,6 +1,6 @@
 # AI-2026-005 Blocked
 
-Current blocker: `P0-AI-2026-005-005`. After user speech interrupts active announce, stale announce correlation prevents the same user turn from producing a fresh normal response.
+Current blocker: none. `P0-AI-2026-005-005` passed closed Delta Review. The overlap Gate rerun waits for the separate App P0-002 execution; physical validation remains pending and is not an AI machine blocker.
 
 Current v1.1 blocker: none. Goal-level MVP Review passed; only approved merge/push and later physical validation remain.
 
