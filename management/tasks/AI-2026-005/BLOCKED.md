@@ -1,5 +1,7 @@
 # AI-2026-005 Blocked
 
+Current blocker: `P0-AI-2026-005-005`. After user speech interrupts active announce, stale announce correlation prevents the same user turn from producing a fresh normal response.
+
 Current v1.1 blocker: none. Goal-level MVP Review passed; only approved merge/push and later physical validation remain.
 
 ## 2026-08-30 v1.1 status

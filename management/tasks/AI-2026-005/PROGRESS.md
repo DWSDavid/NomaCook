@@ -1,5 +1,13 @@
 # AI-2026-005 Progress
 
+## 2026-08-31 physical P0-005 activation
+
+Status: `ready / blocked-by-P0-005 / physical-validation-pending`.
+
+- Opening reviewed HEAD: `dd7ad983ef6502a5d86980f99478742ffc81b7ae`.
+- Physical sequence: Agent announce entered speaking, user speech moved to thinking, announce failed, but no normal response followed.
+- Fix only interrupted-announce to fresh-user-response correlation in the existing Realtime service; no model call or deployment.
+
 ## 2026-08-30 v1.1 goal-level Review
 
 Status: `machine-complete / MVP-review-passed / physical-validation-pending`.

@@ -1,26 +1,26 @@
 schema_version: 1
 task_id: "AI-2026-005"
-review_status: "approved"
-review_result: "MVP-review-passed / physical-validation-pending"
-review_mode: "MVP-goal-final-review"
-review_base_commit: "a3e662245497821671823359aadb9fdcaddecf6d"
-reviewed_head_commit: "5180dd1d1263ddc0952823f671695d2f39ec1c51"
-reviewed_implementation_head: "502f5987467654108568a786c9af2209d9d19913"
-management_revision: "08a5cf94438605eb74181845e442835647f4e393"
+review_status: "pending"
+review_result: "blocked-by-physical-P0-005"
+review_mode: "MVP-closed-delta-review"
+review_base_commit: "dd7ad983ef6502a5d86980f99478742ffc81b7ae"
+management_revision: "5e7db090fcda482716eb0f2ae3cbb6c45be2c33a"
 contract_revision: "1249c2e0b6b0d7e367aaec89402c9043b904a044"
 review_scope:
-  - "AI-2026-005 v1.1 changed production paths, direct response/announce framing invariants and exact-archive Gate evidence."
-findings: []
-required_changes: []
+  - "P0-AI-2026-005-005 only: interrupted announce to fresh user response correlation and direct ordered-output invariants."
+findings:
+  - id: "P0-AI-2026-005-005"
+    status: "open"
+    trigger: "Physical user speech interrupted active announce; announce failed but the user turn produced no normal response."
+    owner: "server/realtime provider/session response correlation"
+required_changes:
+  - "Separate cancelled announce response ownership from the following semantic-VAD user response and prove ordered normal output once."
 resolved_findings: []
 external_dependencies:
-  - "Real Provider, service process, Pi/App and physical audio behavior remain pending."
+  - "Physical rerun waits for AI and App Deltas plus combined Review."
 non_blocking_backlog: []
-verification_accepted:
-  - "Executor reports Realtime 39 and Model Service 66 passing with zero skips, compile/diff/path/privacy checks and Provider calls 0."
-  - "INTEGRATION-2026-006 v1.1 Gate consumed AI production bytes for text/audio ordering, PCM framing, announce states and session-wide sequence/timestamp."
+verification_accepted: []
 verification_performed_by_manager:
-  - "Static review confirmed schema 1.1 strict DTOs, response-scoped utterance correlation, first-real-frame audio_started, partial PCM padding, zero-audio failure and ordered outbound queue."
-  - "Did not rerun suites, read config.yaml, call a Provider, deploy or operate devices."
-remaining_state: "machine-complete / MVP-review-passed / physical-validation-pending"
-next_review: "No further machine Review; proceed only to approved merge/push and later physical validation."
+  - "Physical projection order and absence of playback begin localize the first failure before Hardware."
+remaining_state: "blocked-by-P0 / machine-delta-pending / physical-validation-pending"
+next_review: "Review only P0-005 changed paths and direct invariants after full Fake-Provider GREEN."

@@ -1,5 +1,9 @@
 # AI-2026-005 Handoff
 
+## 2026-08-31 P0-005 next action
+
+Execute one closed Fake-Provider Delta from the Manager activation HEAD. Reproduce active announce → user interruption → cancelled announce terminal → same user speech normal response, then repair response_id/utterance ownership and ordered output. Submit implementation/test and sanitized evidence commits; do not deploy or call real Qwen.
+
 ## 2026-08-30 reviewed handoff
 
 v1.1 candidate `5180dd1d1263ddc0952823f671695d2f39ec1c51` passed the single goal-level MVP Review. Do not reopen machine scope; next actions are human-approved merge/push and later real Provider/physical validation.

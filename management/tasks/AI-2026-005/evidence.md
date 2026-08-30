@@ -1,5 +1,12 @@
 # AI-2026-005 Evidence
 
+## 2026-08-31 P0-005 physical RED
+
+- Realtime WebSocket ready; Agent announce entered speaking.
+- User speech started/stopped and Backend projected thinking.
+- Announce terminated failed, but no subsequent normal assistant text/audio/playback begin occurred.
+- No raw speech, transcript, model output, IDs, credentials or full logs retained.
+
 ## 2026-08-30 v1.1 activation
 
 - Management revision: `7dba37cd0e732011b86bfd797f4663c37bb2a185`.

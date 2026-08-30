@@ -2,9 +2,9 @@ schema_version: 1
 task_id: "AI-2026-005"
 initiative_id: "INIT-2026-004"
 domain: "ai"
-status: machine-complete
+status: ready
 risk_level: "high"
-management_revision: "08a5cf94438605eb74181845e442835647f4e393"
+management_revision: "5e7db090fcda482716eb0f2ae3cbb6c45be2c33a"
 contract_revision: "1249c2e0b6b0d7e367aaec89402c9043b904a044"
 repository: "AI"
 base_branch: "agent/cv-live-camera"
@@ -52,6 +52,11 @@ required_checks:
   - "run only realtime/model-service focused tests, compileall, diff-check, allowed-path and privacy scans with 0 skips and Provider calls 0"
   - "submit one implementation/test commit and one sanitized evidence commit; do not request isolated Review, wait for the goal-level batch Review"
   - "do not start Backend/Node/App/Hardware, read config.yaml, deploy, push or merge"
+  - "P0-005: physical user speech interrupted an active Agent announce; announce.failed was emitted but speech_stopped never produced a fresh normal response, assistant message or audio"
+  - "RED must reproduce one Provider session where announce response is active, speech_started cancels it, the matching cancelled terminal arrives, speech_stopped/user audio then creates a distinct normal response; old announce response_id/utterance must never own the new response"
+  - "fix Provider/session correlation and ordering as one batch so interrupted announce emits failed once, stale announce terminal/audio is dropped, and the user turn emits thinking, assistant_text, audio_started, binary frames and audio_done exactly once"
+  - "preserve semantic VAD, no automatic retry, one ordered outbound queue, schema 1.1, announce exact path and session-wide sequence/timestamp"
+  - "run complete realtime/model-service focused tests with Fake Provider calls 0; do not call real Qwen or modify Backend/App/Hardware"
 required_human_approvals: 1
 design_ref: "nomacook-workspace:docs/superpowers/specs/2026-08-30-nomacook-realtime-ai-cooking-v1-1-design.md@1249c2e0b6b0d7e367aaec89402c9043b904a044"
 plan_ref: "nomacook-workspace:docs/superpowers/plans/2026-08-30-nomacook-realtime-ai-cooking-v1-1.md@1249c2e0b6b0d7e367aaec89402c9043b904a044"
