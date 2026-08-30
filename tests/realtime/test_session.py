@@ -17,16 +17,23 @@ from server.realtime.session import RealtimeSession, SessionError
 SESSION_ID = "11111111-1111-1111-1111-111111111111"
 
 
-def _envelope(message_type: str, payload: dict[str, Any], *, seq: int, generation: int = 1) -> str:
+def _envelope(
+    message_type: str,
+    payload: dict[str, Any],
+    *,
+    seq: int,
+    generation: int = 1,
+    occurred_at: str = "2026-08-29T10:00:00Z",
+) -> str:
     return json.dumps({
         "contract_version": "ai-realtime.contract.v1",
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "session_id": SESSION_ID,
         "session_generation": generation,
         "producer": "backend",
         "stream_sequence": seq,
         "message_type": message_type,
-        "occurred_at": "2026-08-29T10:00:00Z",
+        "occurred_at": occurred_at,
         "payload": payload,
     })
 
@@ -95,6 +102,15 @@ class FakeProvider:
     async def events(self) -> AsyncIterator[ProviderEvent]:
         if False:
             yield ProviderEvent("noop")
+
+
+class FakeCodec:
+    def __init__(self) -> None:
+        self.frames: list[bytes] = []
+
+    def encode_output_pcm(self, pcm: bytes) -> bytes:
+        self.frames.append(pcm)
+        return b"opus"
 
 
 def _run(coro):
@@ -298,7 +314,7 @@ def test_announce_mismatch_or_failed_response_discards_audio() -> None:
 
 def test_failed_or_incomplete_response_done_never_emits_audio_done() -> None:
     async def run() -> None:
-        for status, pcm in (("failed", b"\x00\x00" * 480), ("completed", b"\x00\x00" * 240)):
+        for status, pcm in (("failed", b"\x00\x00" * 480), ("completed", b"\x00")):
             provider = FakeProvider()
             session = RealtimeSession(SESSION_ID, 1, provider=provider)
             await session.handle_text(_start())
@@ -310,5 +326,192 @@ def test_failed_or_incomplete_response_done_never_emits_audio_done() -> None:
             assert events[-1].message_type == "session.failed"
             assert all(event.message_type != "response.audio_done" for event in events)
             assert await session.drain_audio() == []
+
+    _run(run())
+
+
+def test_v1_1_text_first_and_audio_first_share_utterance_id() -> None:
+    async def run() -> None:
+        pcm = b"\x01\x00" * 480
+        for text_first in (True, False):
+            provider = FakeProvider()
+            codec = FakeCodec()
+            session = RealtimeSession(SESSION_ID, 1, provider=provider, codec=codec)
+            await session.handle_text(_start())
+            await session.drain_events()
+            if text_first:
+                await session.handle_provider_event(
+                    ProviderEvent("assistant_text", text="回答", response_id="r1")
+                )
+                await session.handle_provider_event(
+                    ProviderEvent("audio_pcm", pcm=pcm, response_id="r1")
+                )
+            else:
+                await session.handle_provider_event(
+                    ProviderEvent("audio_pcm", pcm=pcm, response_id="r1")
+                )
+                await session.handle_provider_event(
+                    ProviderEvent("assistant_text", text="回答", response_id="r1")
+                )
+            await session.handle_provider_event(
+                ProviderEvent("response_done", status="completed", response_id="r1")
+            )
+            events = await session.drain_events()
+            text_event = next(e for e in events if e.message_type == "response.assistant_text")
+            started_event = next(e for e in events if e.message_type == "response.audio_started")
+            done_event = next(e for e in events if e.message_type == "response.audio_done")
+            assert text_event.payload["utterance_id"] == started_event.payload["utterance_id"]
+            assert started_event.payload["utterance_id"] == done_event.payload["utterance_id"]
+            assert done_event.payload["output_frame_count"] == 1
+            assert done_event.payload.get("message_ref") is None
+
+    _run(run())
+
+
+def test_v1_1_partial_pcm_is_silence_padded_and_zero_audio_fails_closed() -> None:
+    async def run() -> None:
+        provider = FakeProvider()
+        codec = FakeCodec()
+        session = RealtimeSession(SESSION_ID, 1, provider=provider, codec=codec)
+        await session.handle_text(_start())
+        await session.drain_events()
+        await session.handle_provider_event(
+            ProviderEvent("audio_pcm", pcm=b"\x01\x00" * 100, response_id="r1")
+        )
+        await session.handle_provider_event(ProviderEvent("audio_done", response_id="r1"))
+        await session.handle_provider_event(
+            ProviderEvent("response_done", status="completed", response_id="r1")
+        )
+        events = await session.drain_events()
+        assert events[-1].message_type == "response.audio_done"
+        assert events[-1].payload["output_frame_count"] == 1
+        assert len(codec.frames) == 1
+        assert len(codec.frames[0]) == 960
+        assert codec.frames[0][200:] == b"\x00" * 760
+
+        empty_session = RealtimeSession(SESSION_ID, 1, provider=FakeProvider(), codec=FakeCodec())
+        await empty_session.handle_text(_start())
+        await empty_session.drain_events()
+        await empty_session.handle_provider_event(
+            ProviderEvent("response_done", status="completed", response_id="empty")
+        )
+        empty_events = await empty_session.drain_events()
+        assert empty_events[-1].message_type == "session.failed"
+        assert await empty_session.drain_audio() == []
+
+    _run(run())
+
+
+def test_v1_1_announce_releases_full_correlated_order_after_validation() -> None:
+    async def run() -> None:
+        provider = FakeProvider()
+        codec = FakeCodec()
+        session = RealtimeSession(SESSION_ID, 1, provider=provider, codec=codec)
+        await session.handle_text(_start())
+        await session.drain_outbound()
+        payload = {
+            "utterance_id": "u2",
+            "message_ref": "m2",
+            "text": "继续翻炒",
+            "deadline_at": "2026-08-29T10:00:15Z",
+        }
+        await session.handle_text(_envelope("announce", payload, seq=2))
+        await session.handle_provider_event(
+            ProviderEvent("assistant_text", text="继续翻炒", response_id="response-1")
+        )
+        await session.handle_provider_event(
+            ProviderEvent("audio_pcm", pcm=b"\x01\x00" * 100, response_id="response-1")
+        )
+        assert await session.drain_outbound() == []
+        await session.handle_provider_event(
+            ProviderEvent("response_done", status="completed", response_id="response-1")
+        )
+        outbound = await session.drain_outbound()
+        assert [kind for kind, _ in outbound] == ["text", "text", "bytes", "text", "text"]
+        text_event, started_event = outbound[0][1], outbound[1][1]
+        done_event, completed_event = outbound[3][1], outbound[4][1]
+        assert text_event.message_type == "response.assistant_text"
+        assert text_event.payload == {
+            "utterance_id": "u2",
+            "message_ref": "m2",
+            "text": "继续翻炒",
+        }
+        assert started_event.payload == {"utterance_id": "u2", "message_ref": "m2"}
+        assert done_event.payload == {"utterance_id": "u2", "output_frame_count": 1}
+        assert completed_event.payload == {"utterance_id": "u2", "message_ref": "m2"}
+
+    _run(run())
+
+
+def test_v1_1_output_packet_timeline_is_session_global() -> None:
+    async def run() -> None:
+        session = RealtimeSession(SESSION_ID, 1, provider=FakeProvider(), codec=FakeCodec())
+        await session.handle_text(_start())
+        await session.drain_events()
+        for response_id in ("r1", "r2"):
+            await session.handle_provider_event(
+                ProviderEvent("audio_pcm", pcm=b"\x01\x00" * 480, response_id=response_id)
+            )
+            await session.handle_provider_event(
+                ProviderEvent("response_done", status="completed", response_id=response_id)
+            )
+        outbound = await session.drain_outbound()
+        frames = [BinaryAudioFrame.from_bytes(item) for kind, item in outbound if kind == "bytes"]
+        assert [frame.packet_sequence for frame in frames] == [1, 2]
+        assert [frame.rtp_timestamp for frame in frames] == [0, 960]
+        envelopes = [item for kind, item in outbound if kind == "text"]
+        assert [item.stream_sequence for item in envelopes] == list(
+            range(1, len(envelopes) + 1)
+        )
+        assert all(item.schema_version == "1.1" for item in envelopes)
+        assert all(
+            earlier.occurred_at < later.occurred_at
+            for earlier, later in zip(envelopes, envelopes[1:])
+        )
+
+    _run(run())
+
+
+def test_v1_1_announce_without_audio_fails_closed() -> None:
+    async def run() -> None:
+        session = RealtimeSession(SESSION_ID, 1, provider=FakeProvider(), codec=FakeCodec())
+        await session.handle_text(_start())
+        await session.drain_events()
+        payload = {
+            "utterance_id": "u3",
+            "message_ref": "m3",
+            "text": "继续翻炒",
+            "deadline_at": "2026-08-29T10:00:15Z",
+        }
+        await session.handle_text(_envelope("announce", payload, seq=2))
+        await session.handle_provider_event(
+            ProviderEvent("assistant_text", text="继续翻炒", response_id="response-1")
+        )
+        await session.handle_provider_event(
+            ProviderEvent("audio_done", response_id="response-1")
+        )
+        await session.handle_provider_event(
+            ProviderEvent("response_done", status="completed", response_id="response-1")
+        )
+        events = await session.drain_events()
+        assert events[-1].message_type == "announce.failed"
+        assert await session.drain_audio() == []
+
+    _run(run())
+
+
+def test_v1_1_backend_control_timestamp_cannot_move_backwards() -> None:
+    async def run() -> None:
+        session = RealtimeSession(SESSION_ID, 1, provider=FakeProvider(), codec=FakeCodec())
+        await session.handle_text(_start())
+        with pytest.raises(SessionError):
+            await session.handle_text(
+                _envelope(
+                    "session.pause",
+                    {},
+                    seq=2,
+                    occurred_at="2026-08-29T09:59:59Z",
+                )
+            )
 
     _run(run())

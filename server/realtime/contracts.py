@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 CONTRACT_VERSION = "ai-realtime.contract.v1"
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 SUBPROTOCOL = "nomacook.ai-realtime.v1"
 MAX_CONTROL_FRAME_BYTES = 64 * 1024
 MAX_CONTEXT_BYTES = 32 * 1024
@@ -169,6 +169,28 @@ class SessionStopPayload(StrictDTO):
         return value
 
 
+class ResponseAssistantTextPayload(StrictDTO):
+    utterance_id: str = Field(min_length=1, max_length=128)
+    text: str = Field(max_length=1000)
+    message_ref: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class ResponseAudioStartedPayload(StrictDTO):
+    utterance_id: str = Field(min_length=1, max_length=128)
+    message_ref: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class ResponseAudioDonePayload(StrictDTO):
+    utterance_id: str = Field(min_length=1, max_length=128)
+    output_frame_count: int = Field(gt=0)
+
+
+class AnnounceResultPayload(StrictDTO):
+    utterance_id: str = Field(min_length=1, max_length=128)
+    message_ref: str = Field(min_length=1, max_length=128)
+    code: str | None = Field(default=None, min_length=1, max_length=128)
+
+
 class RealtimeEnvelope(StrictDTO):
     contract_version: Literal[CONTRACT_VERSION]
     schema_version: Literal[SCHEMA_VERSION]
@@ -216,6 +238,14 @@ class RealtimeEnvelope(StrictDTO):
             AnnouncePayload.model_validate(self.payload, strict=False)
         elif self.message_type == "session.stop":
             SessionStopPayload.model_validate(self.payload, strict=False)
+        elif self.message_type == "response.assistant_text":
+            ResponseAssistantTextPayload.model_validate(self.payload, strict=False)
+        elif self.message_type == "response.audio_started":
+            ResponseAudioStartedPayload.model_validate(self.payload, strict=False)
+        elif self.message_type == "response.audio_done":
+            ResponseAudioDonePayload.model_validate(self.payload, strict=False)
+        elif self.message_type in {"announce.completed", "announce.failed"}:
+            AnnounceResultPayload.model_validate(self.payload, strict=False)
         elif self.message_type in {"session.pause", "session.resume"} and self.payload:
             raise ValueError("lifecycle pause/resume payload must be empty")
         return self

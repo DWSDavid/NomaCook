@@ -80,7 +80,7 @@ def _start() -> dict:
     profile = {"encoding": "opus", "clock_rate_hz": 48000, "channels": 2, "frame_duration_ms": 20}
     return {
         "contract_version": "ai-realtime.contract.v1",
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "session_id": SESSION_ID,
         "session_generation": 1,
         "producer": "backend",

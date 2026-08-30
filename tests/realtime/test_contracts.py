@@ -22,7 +22,7 @@ SESSION_ID = "11111111-1111-1111-1111-111111111111"
 def _start(*, seq: int = 1, generation: int = 1) -> dict:
     return {
         "contract_version": "ai-realtime.contract.v1",
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "session_id": SESSION_ID,
         "session_generation": generation,
         "producer": "backend",
@@ -56,6 +56,23 @@ def test_session_start_is_strictly_parsed() -> None:
     assert isinstance(parsed, RealtimeEnvelope)
     assert parsed.session_id == UUID(SESSION_ID)
     assert parsed.message_type == "session.start"
+
+
+def test_schema_v1_0_is_rejected_on_v1_1_branch() -> None:
+    payload = _start()
+    payload["schema_version"] = "1.0"
+    with pytest.raises((ValidationError, ValueError)):
+        parse_control_json(json.dumps(payload))
+
+
+def test_v1_1_response_payload_rejects_unknown_fields() -> None:
+    payload = _start()
+    payload.update(
+        message_type="response.audio_done",
+        payload={"utterance_id": "u1", "output_frame_count": 1, "extra": True},
+    )
+    with pytest.raises((ValidationError, ValueError)):
+        parse_control_json(json.dumps(payload))
 
 
 @pytest.mark.parametrize(
