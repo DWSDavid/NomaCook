@@ -1,37 +1,30 @@
 schema_version: 1
 task_id: "AI-2026-005"
-review_status: "changes_requested"
-review_result: "blocked-by-P0 / integration-pending"
-review_mode: "MVP-closed-delta-review"
-review_base_commit: "5def6fdf39e234b579852061d076944b96b8dd57"
-reviewed_head_commit: "5c5d96a857567e96ea86a9fa6cdb45217cd5526f"
-reviewed_implementation_head: "7c6e9ae29d80b7fb01c311d530cbac4c48863a1a"
+review_status: "approved"
+review_result: "MVP-review-passed / physical-validation-pending"
+review_mode: "MVP-goal-final-review"
+review_base_commit: "d8e68742d1cc3730dc19f097ad90a2d585b2e40a"
+reviewed_head_commit: "07d2f5dd05857e4bc348ac4528756608b4f2ff1b"
+reviewed_implementation_head: "ae872c00c51a5f2252a616ab95aeee2340a9e3ce"
 management_revision: "6d5d088d57e558277c858926b8497140151d9f85"
 contract_revision: "6d5d088d57e558277c858926b8497140151d9f85"
 review_scope:
-  - "AI-2026-005 closed Delta and direct production composition/readiness invariants under CONTRACT-AI-REALTIME-001 v1."
-findings:
-  - id: "P0-AI-2026-005-004"
-    owner: "ai-executor"
-    file: "server/gateway/main.py:12"
-    trigger: "Realtime configuration is ready but the retained Agent Model Service configuration is disabled or invalid, and orchestration checks the combined production `/ready`."
-    impact: "The combined app returns 200 because readiness is owned only by Realtime even though the retained Agent service is nil; preflight passes and the first Agent model call fails, preventing visual Decision/Tool feedback."
-    contract: "The approved v1 design keeps the Agent Model route and requires the complete AI Cooking topology to be ready before user validation."
-    evidence: "Manager no-write production factory probe returned COMBINED_READY_STATUS=200 and AGENT_MODEL_SERVICE_PRESENT=false."
-required_changes:
-  - "Make the single production `/ready` require both retained Agent Model Service readiness and Realtime readiness/codec/capacity without calling either Provider."
-  - "Add RED/GREEN for Realtime-ready+Agent-unready=503, Agent-ready+Realtime-unready=503 and both-ready=200 while retaining both production routes."
+  - "AI-2026-005 final Delta, combined production readiness, retained Agent/Reatime routes and direct CONTRACT-AI-REALTIME-001 v1 wire invariants."
+findings: []
+required_changes: []
 resolved_findings:
   - "P0-AI-2026-005-001"
   - "P0-AI-2026-005-002"
   - "P0-AI-2026-005-003"
+  - "P0-AI-2026-005-004"
 external_dependencies:
-  - "Backend, Hardware, App and final Integration remain separate tasks; P0-004 reproduces locally."
+  - "Real Provider and physical App/Pi validation remain explicitly pending."
 non_blocking_backlog: []
 verification_accepted:
-  - "Closed Delta reports tests/realtime 29 and tests/model_service 66 passing with zero skips, plus compile/diff/path/privacy checks and Provider calls 0."
+  - "Final Delta reports tests/realtime 31 and tests/model_service 66 passing with zero skips, compile/diff/path/privacy checks and Provider calls 0."
+  - "INTEGRATION-2026-006 production-byte Wire Gate passed AI control/binary Opus compatibility at frozen candidate 07d2f5dd05857e4bc348ac4528756608b4f2ff1b."
 verification_performed_by_manager:
   - "Confirmed production route registration, session.updated readiness, PCM accumulation, ordered outbound queue and terminal-correlated exact announce behavior."
   - "Ran one no-write combined readiness probe only; did not call a Provider, read config.yaml, deploy or repeat suites."
-remaining_state: "blocked-by-P0 / manager-final-delta-review-pending / integration-pending"
-next_review: "One readiness-only closed Delta; do not reopen transport, codec or announce paths."
+remaining_state: "machine-complete / MVP-review-passed / physical-validation-pending"
+next_review: "Proceed to human-approved merge/deploy and physical validation; do not reopen v1.0 machine scope without a reproduced P0."
