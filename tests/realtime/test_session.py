@@ -112,6 +112,9 @@ class FakeCodec:
         self.frames.append(pcm)
         return b"opus"
 
+    def decode_input_opus(self, payload: bytes) -> bytes:
+        return b"pcm"
+
 
 def _run(coro):
     return asyncio.run(coro)
@@ -513,5 +516,79 @@ def test_v1_1_backend_control_timestamp_cannot_move_backwards() -> None:
                     occurred_at="2026-08-29T09:59:59Z",
                 )
             )
+
+    _run(run())
+
+
+def test_interrupted_announce_quarantines_late_terminal_before_new_user_response() -> None:
+    async def run() -> None:
+        provider = FakeProvider()
+        session = RealtimeSession(SESSION_ID, 1, provider=provider, codec=FakeCodec())
+        await session.handle_text(_start())
+        await session.drain_outbound()
+        await session.handle_text(
+            _envelope(
+                "announce",
+                {
+                    "utterance_id": "u-announce",
+                    "message_ref": "m-announce",
+                    "text": "请继续",
+                    "deadline_at": "2026-08-29T10:00:15Z",
+                },
+                seq=2,
+            )
+        )
+        await session.handle_provider_event(
+            ProviderEvent("audio_started", response_id="response-1")
+        )
+        await session.handle_provider_event(ProviderEvent("speech_started"))
+        interrupted = await session.drain_events()
+        assert [event.message_type for event in interrupted].count("announce.failed") == 1
+
+        for event in (
+            ProviderEvent("audio_pcm", pcm=b"\x01\x00" * 480, response_id="response-1"),
+            ProviderEvent("audio_done", response_id="response-1"),
+            ProviderEvent("response_done", status="cancelled", response_id="response-1"),
+        ):
+            await session.handle_provider_event(event)
+        assert await session.drain_events() == []
+        assert await session.drain_audio() == []
+
+        await session.handle_provider_event(ProviderEvent("speech_stopped"))
+        await session.handle_binary(BinaryAudioFrame("input_opus", 1, 0, b"opus").to_bytes())
+        await session.handle_provider_event(
+            ProviderEvent("assistant_text", text="用户回复", response_id="normal-r2")
+        )
+        await session.handle_provider_event(
+            ProviderEvent("audio_pcm", pcm=b"\x01\x00" * 480, response_id="normal-r2")
+        )
+        await session.handle_provider_event(
+            ProviderEvent("response_done", status="completed", response_id="normal-r2")
+        )
+        events = await session.drain_events()
+        assert [event.message_type for event in events].count("response.thinking") == 1
+        assert [event.message_type for event in events].count("response.assistant_text") == 1
+        assert [event.message_type for event in events].count("response.audio_started") == 1
+        assert [event.message_type for event in events].count("response.audio_done") == 1
+        assert all(event.message_type != "session.failed" for event in events)
+        text_event = next(
+            event for event in events if event.message_type == "response.assistant_text"
+        )
+        assert text_event.payload["utterance_id"] != "u-announce"
+
+        outbound = await session.drain_outbound()
+        normal_items = [
+            item
+            for kind, item in outbound
+            if kind == "bytes"
+            or getattr(item, "message_type", None)
+            in {"response.assistant_text", "response.audio_started", "response.audio_done"}
+        ]
+        assert [
+            item.message_type if not isinstance(item, bytes) else "binary"
+            for item in normal_items
+        ] == ["response.assistant_text", "response.audio_started", "binary", "response.audio_done"]
+        assert len([item for kind, item in outbound if kind == "bytes"]) == 1
+        assert provider.sent_pcm == [b"pcm"]
 
     _run(run())

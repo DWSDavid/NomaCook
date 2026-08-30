@@ -62,6 +62,9 @@ class RealtimeSession:
         self._ai_sequence = 0
         self._last_occurred_at: datetime | None = None
         self._utterance_counter = 0
+        self._used_utterance_ids: set[str] = set()
+        self._stale_response_ids: set[str] = set()
+        self._thinking_emitted = False
         self._started = False
         self._paused = False
         self._closed = False
@@ -163,9 +166,12 @@ class RealtimeSession:
     async def handle_provider_event(self, event: ProviderEvent) -> None:
         if self._closed:
             return
+        if self._is_stale_provider_event(event):
+            return
         if event.type == "ready":
             return
         if event.type == "speech_started":
+            self._thinking_emitted = False
             if self._pending_announce is not None:
                 await self.provider.cancel_response()
                 self._emit_announce_failed("INTERRUPTED")
@@ -179,8 +185,10 @@ class RealtimeSession:
                 self._reset_response()
             self._emit("input.speech_started", {})
         elif event.type == "speech_stopped":
-            self._emit("input.speech_stopped", {})
-            self._emit("response.thinking", {})
+            if not self._thinking_emitted:
+                self._thinking_emitted = True
+                self._emit("input.speech_stopped", {})
+                self._emit("response.thinking", {})
         elif event.type == "assistant_text":
             text = event.text or ""
             if len(text) > 1000:
@@ -348,6 +356,7 @@ class RealtimeSession:
             self._emit_failure("IDEMPOTENCY_CONFLICT", retryable=False, phase="announce")
             return
         self._announces[payload.message_ref] = fingerprint
+        self._used_utterance_ids.add(payload.utterance_id)
         try:
             response_id = await self.provider.announce(payload.model_dump(mode="json"))
         except Exception:
@@ -567,8 +576,13 @@ class RealtimeSession:
         if self._pending_announce is not None:
             self._utterance_id = self._pending_announce["utterance_id"]
         else:
-            self._utterance_counter += 1
-            self._utterance_id = f"u{self._utterance_counter}"
+            while True:
+                self._utterance_counter += 1
+                candidate = f"u{self._utterance_counter}"
+                if candidate not in self._used_utterance_ids:
+                    self._utterance_id = candidate
+                    self._used_utterance_ids.add(candidate)
+                    break
         self._response_text_emitted = False
         self._response_audio_started = False
         self._response_frame_count = 0
@@ -583,6 +597,20 @@ class RealtimeSession:
             return True
         expected = self._pending_announce["response_id"]
         return expected == response_id
+
+    def _is_stale_provider_event(self, event: ProviderEvent) -> bool:
+        if event.response_id is None:
+            return False
+        if event.type not in {
+            "assistant_text",
+            "audio_started",
+            "audio_pcm",
+            "audio_done",
+            "response_done",
+            "error",
+        }:
+            return False
+        return event.response_id in self._stale_response_ids
 
     def _terminal_duplicate(self, response_id: str | None) -> bool:
         if self._response_active or not self._last_terminal_seen:
@@ -636,6 +664,8 @@ class RealtimeSession:
         pending = self._pending_announce
         if pending is None:
             return
+        if pending["response_id"] is not None:
+            self._stale_response_ids.add(pending["response_id"])
         self._remove_queued_audio()
         self._emit(
             "announce.failed",
