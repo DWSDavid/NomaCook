@@ -162,3 +162,48 @@ Executor must append RED/GREEN commands, exit codes, test counts, dependency cha
 - 真实 Provider calls：`0`；未启动 Backend、Node、App、Hardware，未部署、push 或 merge。
 
 状态：`machine-complete / manager-final-delta-review-pending / integration-pending`。
+
+## Realtime v1.1 Executor Evidence — 2026-08-30
+
+### Authority and scope
+
+- AI branch：`codex/ai-realtime-model-service-v1-1`；opening HEAD：
+  `a3e662245497821671823359aadb9fdcaddecf6d`；task base：
+  `6f9047ad779773e4ea6500b2ecc67c0805dc3ca0`；opening HEAD 为 base 后代。
+- Management revision：`7dba37cd0e732011b86bfd797f4663c37bb2a185`；contract/design/plan
+  revision：`1249c2e0b6b0d7e367aaec89402c9043b904a044`。
+- 仅修改 `server/realtime/contracts.py`、`server/realtime/session.py`、
+  `tests/realtime/test_app.py`、`tests/realtime/test_contracts.py`、`tests/realtime/test_session.py`
+  及本任务允许的脱敏证据文件；未修改 `task.yaml`、`review.yaml`、契约或设计/计划。
+- `config.yaml` 与 `.gitkeep` 仍保持未跟踪；正文未读取，且未被修改、移动、暂存、提交、忽略或删除。
+
+### RED
+
+- `./.venv/bin/python -m pytest tests/realtime -q`（实现前）exit `1`，`15 failed / 21 passed`；
+  失败复现 v1.1 夹具与旧 schema `1.0` 不兼容，以及响应关联、partial PCM、announce 顺序和帧时间线缺口。
+
+### GREEN and implementation
+
+- `server/realtime/contracts.py` 固定 schema `1.1`，拒绝 schema `1.0` 和未知响应 payload 字段；响应事件
+  严格校验 `utterance_id`、可空/回显 `message_ref` 与正数 `output_frame_count`。
+- `server/realtime/session.py` 为普通 Provider response 生成临时 `utterance_id`，支持 text-first/audio-first；
+  任意偶数字节 PCM 按 24 kHz mono 20 ms 累积，终态尾部静音补齐，空音频与异常终态 fail-closed。
+- announce 缓存 transcript/audio，完成前不释放；仅授权文本逐字匹配且存在音频时按
+  `assistant_text → audio_started → binary → audio_done → announce.completed` 输出，并回显
+  Backend 的 `utterance_id`/`message_ref`；mismatch/no-audio/error/timeout 均 `announce.failed`。
+- 输出 binary packet sequence 从 1、timestamp 从 0 起步并跨 response 连续递增（960）；AI control
+  sequence 与 occurred_at 维持 Session 全局连续性。
+- Implementation/test Commit：`502f5987467654108568a786c9af2209d9d19913`。
+
+### Verification
+
+- `./.venv/bin/python -m pytest tests/realtime -q`：`39 passed / 0 skipped`，exit `0`。
+- `./.venv/bin/python -m pytest tests/model_service -q`：`66 passed / 0 skipped`，exit `0`。
+- `./.venv/bin/python -m compileall -q server/realtime server/gateway`：exit `0`。
+- `git diff --check`：exit `0`。
+- Production/local-device scan：未发现本机麦克风/扬声器调用或会话/音频文件写入。
+- Changed-file privacy scan：未发现私密配置正文、完整凭据、私钥或 config 文件内容；Fake Provider only，
+  Provider calls `0`。未启动 Backend/Node/App/Hardware，未部署、push、merge。
+- 测试仅有既存 Starlette/httpx deprecation warning；无失败、无 skip、无新增依赖。
+
+状态：`machine-complete / v1.1-goal-review-pending / physical-validation-pending`。

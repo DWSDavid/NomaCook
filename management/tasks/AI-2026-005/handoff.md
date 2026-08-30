@@ -34,6 +34,19 @@ and evidence commits, then stop for final Delta Review.
 - 证据 Commit 提交后停止，等待 Manager final Delta Review；不读取或处理
   `config.yaml`、`.gitkeep`，不调用真实 Qwen，不启动其他端，不部署、push 或 merge。
 
+## Realtime v1.1 Executor Handoff — 2026-08-30
+
+- Opening HEAD：`a3e662245497821671823359aadb9fdcaddecf6d`；implementation/test
+  Commit：`502f5987467654108568a786c9af2209d9d19913`。
+- 已一次性完成 task.yaml v1.1 缺口：schema `1.1`、response `utterance_id`/announce
+  `message_ref`/`output_frame_count`、text-first/audio-first、partial PCM 静音补齐与 zero-audio
+  fail-closed、announce 完整关联顺序、Session 全局 sequence/timestamp 连续性。
+- 验证：`tests/realtime` `39 passed / 0 skipped`；`tests/model_service` `66 passed / 0 skipped`；
+  compileall、diff-check、允许路径与脱敏扫描通过；Fake Provider calls `0`。
+- 证据 Commit 提交后停止，等待四域候选齐备后的 goal-level Review；物理验收保持 pending。
+  不读取或处理 `config.yaml`、`.gitkeep`，不调用真实 Qwen，不启动 Backend/Node/App/Hardware，
+  不部署、push 或 merge。
+
 ## Executor Handoff — 2026-08-29
 
 状态：`machine-complete / manager-review-pending / integration-pending`。

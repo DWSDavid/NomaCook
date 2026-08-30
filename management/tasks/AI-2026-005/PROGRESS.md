@@ -53,6 +53,25 @@ that readiness invariant.
 
 当前状态：`machine-complete / manager-final-delta-review-pending / integration-pending`。
 
+## Realtime v1.1 Executor Delta — 2026-08-30
+
+- 接管 HEAD：`a3e662245497821671823359aadb9fdcaddecf6d`；基线
+  `6f9047ad779773e4ea6500b2ecc67c0805dc3ca0`、management revision
+  `7dba37cd0e732011b86bfd797f4663c37bb2a185`、contract/design/plan revision
+  `1249c2e0b6b0d7e367aaec89402c9043b904a044` 均已核验；task/review 未修改。
+- RED：`./.venv/bin/python -m pytest tests/realtime -q`，exit `1`，`15 failed / 21 passed`；
+  v1.1 测试夹具已切换但实现仍声明 schema `1.0`，且缺少响应关联、尾部补齐和 announce 完整顺序。
+- GREEN：同一命令 `39 passed / 0 skipped`，exit `0`；覆盖 schema `1.1` 严格拒绝旧版本/未知字段、
+  text-first/audio-first、统一 `utterance_id`、announce `message_ref`、`output_frame_count`、
+  partial PCM 静音补齐、zero-audio fail-closed、announce 三态、全 Session packet/timestamp 及
+  control sequence 连续性。
+- 回归：`tests/model_service` `66 passed / 0 skipped`，exit `0`；compileall 与 diff-check 通过。
+- 实现/测试 Commit：`502f5987467654108568a786c9af2209d9d19913`。
+- Fake Provider only，Provider calls `0`；未读取或处理 `config.yaml`、`.gitkeep`，未启动其他端、部署、
+  push 或 merge。
+
+当前状态：`machine-complete / v1.1-goal-review-pending / physical-validation-pending`。
+
 ## Executor Verification — 2026-08-29
 
 - 接管盘点：AI 仓库 `codex/ai-realtime-model-service-v1`，HEAD
