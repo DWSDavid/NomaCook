@@ -1,5 +1,9 @@
 # AI-2026-005 Blocked
 
+## 2026-08-30 v1.1 status
+
+No current product blocker. Physical validation is intentionally deferred and does not block machine execution.
+
 Current blockers:
 
 - `P0-AI-2026-005-001`: production entrypoint does not mount the Realtime WebSocket.

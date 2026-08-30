@@ -1,5 +1,11 @@
 # AI-2026-005 Evidence
 
+## 2026-08-30 v1.1 activation
+
+- Management revision: `7dba37cd0e732011b86bfd797f4663c37bb2a185`.
+- Contract/design/plan activation: `1249c2e0b6b0d7e367aaec89402c9043b904a044`.
+- No v1.1 tests or Provider calls have run yet; prior v1.0 evidence remains historical only.
+
 ## Manager Activation
 
 - Human owner approved design, implementation plan and `CONTRACT-AI-REALTIME-001 v1`.

@@ -1,30 +1,24 @@
 schema_version: 1
 task_id: "AI-2026-005"
-review_status: "approved"
-review_result: "MVP-review-passed / physical-validation-pending"
+review_status: "pending"
+review_result: "v1.1-machine-execution-pending"
 review_mode: "MVP-goal-final-review"
-review_base_commit: "d8e68742d1cc3730dc19f097ad90a2d585b2e40a"
-reviewed_head_commit: "07d2f5dd05857e4bc348ac4528756608b4f2ff1b"
-reviewed_implementation_head: "ae872c00c51a5f2252a616ab95aeee2340a9e3ce"
-management_revision: "6d5d088d57e558277c858926b8497140151d9f85"
-contract_revision: "6d5d088d57e558277c858926b8497140151d9f85"
+review_base_commit: "6f9047ad779773e4ea6500b2ecc67c0805dc3ca0"
+management_revision: "7dba37cd0e732011b86bfd797f4663c37bb2a185"
+contract_revision: "1249c2e0b6b0d7e367aaec89402c9043b904a044"
 review_scope:
-  - "AI-2026-005 final Delta, combined production readiness, retained Agent/Reatime routes and direct CONTRACT-AI-REALTIME-001 v1 wire invariants."
+  - "AI-2026-005 Realtime v1.1 sealed Delta; review only with the complete four-domain candidate batch and Integration Gate."
 findings: []
 required_changes: []
-resolved_findings:
-  - "P0-AI-2026-005-001"
-  - "P0-AI-2026-005-002"
-  - "P0-AI-2026-005-003"
-  - "P0-AI-2026-005-004"
+resolved_findings: []
 external_dependencies:
-  - "Real Provider and physical App/Pi validation remain explicitly pending."
+  - "Real Provider and physical App/Pi validation remain deferred."
 non_blocking_backlog: []
-verification_accepted:
-  - "Final Delta reports tests/realtime 31 and tests/model_service 66 passing with zero skips, compile/diff/path/privacy checks and Provider calls 0."
-  - "INTEGRATION-2026-006 production-byte Wire Gate passed AI control/binary Opus compatibility at frozen candidate 07d2f5dd05857e4bc348ac4528756608b4f2ff1b."
-verification_performed_by_manager:
-  - "Confirmed production route registration, session.updated readiness, PCM accumulation, ordered outbound queue and terminal-correlated exact announce behavior."
-  - "Ran one no-write combined readiness probe only; did not call a Provider, read config.yaml, deploy or repeat suites."
-remaining_state: "machine-complete / MVP-review-passed / physical-validation-pending"
-next_review: "Proceed to human-approved merge/deploy and physical validation; do not reopen v1.0 machine scope without a reproduced P0."
+verification_accepted: []
+verification_performed_by_manager: []
+prior_review:
+  version: "v1.0"
+  result: "MVP-review-passed / physical-validation-pending"
+  reviewed_head_commit: "07d2f5dd05857e4bc348ac4528756608b4f2ff1b"
+remaining_state: "v1.1-machine-execution-pending / physical-validation-pending"
+next_review: "Wait for all Domain candidates and the v1.1 Wire Gate; do not review this repository in isolation."

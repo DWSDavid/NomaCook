@@ -1,5 +1,14 @@
 # AI-2026-005 Progress
 
+## 2026-08-30 Realtime v1.1 activation
+
+Status: `ready / v1.1-machine-execution-pending / physical-validation-pending`.
+
+- Base: `6f9047ad779773e4ea6500b2ecc67c0805dc3ca0` on `agent/cv-live-camera`.
+- Task branch: `codex/ai-realtime-model-service-v1-1`.
+- Scope is one complete schema/correlation/frame-count/partial-PCM/announce Delta; v1.0 paths remain frozen.
+- Provider calls, config.yaml reads, deployment and isolated Manager Review are forbidden.
+
 Status: `ready / execution-pending`.
 
 - Base: `d8e68742d1cc3730dc19f097ad90a2d585b2e40a`.
