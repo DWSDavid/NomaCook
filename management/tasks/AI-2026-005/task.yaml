@@ -2,9 +2,9 @@ schema_version: 1
 task_id: "AI-2026-005"
 initiative_id: "INIT-2026-004"
 domain: "ai"
-status: ready
+status: machine-complete
 risk_level: "high"
-management_revision: "7dba37cd0e732011b86bfd797f4663c37bb2a185"
+management_revision: "08a5cf94438605eb74181845e442835647f4e393"
 contract_revision: "1249c2e0b6b0d7e367aaec89402c9043b904a044"
 repository: "AI"
 base_branch: "agent/cv-live-camera"

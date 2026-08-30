@@ -1,5 +1,9 @@
 # AI-2026-005 Handoff
 
+## 2026-08-30 reviewed handoff
+
+v1.1 candidate `5180dd1d1263ddc0952823f671695d2f39ec1c51` passed the single goal-level MVP Review. Do not reopen machine scope; next actions are human-approved merge/push and later real Provider/physical validation.
+
 ## 2026-08-30 next action
 
 Execute the complete v1.1 Delta in one bounded RED-to-GREEN batch from `6f9047ad779773e4ea6500b2ecc67c0805dc3ca0`. Submit implementation/test and sanitized evidence commits, then stop without requesting isolated Review. Preserve `.gitkeep` and `config.yaml` by name only and never read their contents.

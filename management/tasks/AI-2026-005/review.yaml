@@ -1,24 +1,26 @@
 schema_version: 1
 task_id: "AI-2026-005"
-review_status: "pending"
-review_result: "v1.1-machine-execution-pending"
+review_status: "approved"
+review_result: "MVP-review-passed / physical-validation-pending"
 review_mode: "MVP-goal-final-review"
-review_base_commit: "6f9047ad779773e4ea6500b2ecc67c0805dc3ca0"
-management_revision: "7dba37cd0e732011b86bfd797f4663c37bb2a185"
+review_base_commit: "a3e662245497821671823359aadb9fdcaddecf6d"
+reviewed_head_commit: "5180dd1d1263ddc0952823f671695d2f39ec1c51"
+reviewed_implementation_head: "502f5987467654108568a786c9af2209d9d19913"
+management_revision: "08a5cf94438605eb74181845e442835647f4e393"
 contract_revision: "1249c2e0b6b0d7e367aaec89402c9043b904a044"
 review_scope:
-  - "AI-2026-005 Realtime v1.1 sealed Delta; review only with the complete four-domain candidate batch and Integration Gate."
+  - "AI-2026-005 v1.1 changed production paths, direct response/announce framing invariants and exact-archive Gate evidence."
 findings: []
 required_changes: []
 resolved_findings: []
 external_dependencies:
-  - "Real Provider and physical App/Pi validation remain deferred."
+  - "Real Provider, service process, Pi/App and physical audio behavior remain pending."
 non_blocking_backlog: []
-verification_accepted: []
-verification_performed_by_manager: []
-prior_review:
-  version: "v1.0"
-  result: "MVP-review-passed / physical-validation-pending"
-  reviewed_head_commit: "07d2f5dd05857e4bc348ac4528756608b4f2ff1b"
-remaining_state: "v1.1-machine-execution-pending / physical-validation-pending"
-next_review: "Wait for all Domain candidates and the v1.1 Wire Gate; do not review this repository in isolation."
+verification_accepted:
+  - "Executor reports Realtime 39 and Model Service 66 passing with zero skips, compile/diff/path/privacy checks and Provider calls 0."
+  - "INTEGRATION-2026-006 v1.1 Gate consumed AI production bytes for text/audio ordering, PCM framing, announce states and session-wide sequence/timestamp."
+verification_performed_by_manager:
+  - "Static review confirmed schema 1.1 strict DTOs, response-scoped utterance correlation, first-real-frame audio_started, partial PCM padding, zero-audio failure and ordered outbound queue."
+  - "Did not rerun suites, read config.yaml, call a Provider, deploy or operate devices."
+remaining_state: "machine-complete / MVP-review-passed / physical-validation-pending"
+next_review: "No further machine Review; proceed only to approved merge/push and later physical validation."

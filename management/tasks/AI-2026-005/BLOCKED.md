@@ -1,5 +1,7 @@
 # AI-2026-005 Blocked
 
+Current v1.1 blocker: none. Goal-level MVP Review passed; only approved merge/push and later physical validation remain.
+
 ## 2026-08-30 v1.1 status
 
 No current product blocker. Physical validation is intentionally deferred and does not block machine execution.
