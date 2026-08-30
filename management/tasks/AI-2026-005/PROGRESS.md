@@ -86,6 +86,20 @@ that readiness invariant.
 
 当前状态：`machine-complete / v1.1-goal-review-pending / physical-validation-pending`。
 
+## P0-005 Closed Delta — 2026-08-31
+
+- Opening HEAD：`a2ab4947eb1d242cff6716b8543165b206046072`；实现/测试 Commit：
+  `5a916ebfbfe6dcb6320e80a918a24912017df873`；opening HEAD 为其祖先；task/review 未修改。
+- RED：`./.venv/bin/python -m pytest tests/realtime/test_session.py::test_interrupted_announce_quarantines_late_terminal_before_new_user_response -q`，
+  exit `1`；迟到旧 announce 音频/cancelled terminal 产生额外失败事件并可污染新 owner。
+- GREEN：同一聚焦场景 `1 passed / 0 skipped`，随后 `tests/realtime` `40 passed / 0 skipped`、
+  `tests/model_service` `66 passed / 0 skipped`，均 exit `0`；announce.failed 恰好一次，迟到旧事件静默丢弃，
+  新用户 response 使用新 utterance，thinking/text/started/done 各一次，binary 与 outbound 顺序正确且无 session.failed。
+- compileall、git diff-check、允许路径与脱敏扫描通过；Fake Provider calls `0`；未读取或处理 `config.yaml`、
+  `.gitkeep`，未调用真实 Qwen，未启动其他端、部署、push 或 merge。
+
+当前状态：`machine-complete / P0-005-review-pending / physical-validation-pending`。
+
 ## Executor Verification — 2026-08-29
 
 - 接管盘点：AI 仓库 `codex/ai-realtime-model-service-v1`，HEAD

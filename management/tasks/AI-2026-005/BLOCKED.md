@@ -42,3 +42,11 @@ partial PCM、zero-audio、announce 完整关联及 Session 全局时间线均�
 39 项与 Model Service 66 项均通过且 0 skip。当前无机器层 blocker，等待四域候选汇总后的 goal-level
 Review；真实 Provider、Backend/Node/App/Hardware 与物理验收保持 `integration-pending /
 physical-validation-pending`。
+
+## P0-005 Closed Delta — 2026-08-31
+
+已隔离被 semantic VAD 打断的 announce response：失败时记录其 response_id/utterance，迟到 cancelled
+terminal/audio 静默丢弃；下一次 speech_stopped + 用户音频建立全新 response owner，并保持 thinking、
+assistant_text、audio_started、binary、audio_done 各一次。Fake Provider calls 为 `0`，Realtime 40 项与
+Model Service 66 项均 0 skip 通过。当前无机器层 blocker，等待 P0-005 封闭式复审；物理联调仍为
+`physical-validation-pending`。

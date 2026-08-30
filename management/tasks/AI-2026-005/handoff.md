@@ -55,6 +55,17 @@ and evidence commits, then stop for final Delta Review.
   不读取或处理 `config.yaml`、`.gitkeep`，不调用真实 Qwen，不启动 Backend/Node/App/Hardware，
   不部署、push 或 merge。
 
+## P0-005 Executor Handoff — 2026-08-31
+
+- Opening HEAD：`a2ab4947eb1d242cff6716b8543165b206046072`；implementation/test Commit：
+  `5a916ebfbfe6dcb6320e80a918a24912017df873`。
+- 已完成 interrupted announce 封闭式修复：失败 announce 的 response_id/utterance 被隔离，迟到 cancelled
+  terminal/audio 静默丢弃；新用户 speech 产生全新 owner 与一次性 thinking/text/audio_started/binary/audio_done。
+- 验证：聚焦 `1 passed / 0 skipped`；Realtime `40 passed / 0 skipped`；Model Service `66 passed / 0 skipped`；
+  compileall/diff-check/路径与隐私扫描通过；Fake Provider calls `0`。
+- 证据 Commit 提交后停止，等待 P0-005 封闭式复审；不读取或处理 `config.yaml`、`.gitkeep`，不调用真实 Qwen，
+  不启动其他端，不部署、push 或 merge。
+
 ## Executor Handoff — 2026-08-29
 
 状态：`machine-complete / manager-review-pending / integration-pending`。

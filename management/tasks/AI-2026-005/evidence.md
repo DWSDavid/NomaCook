@@ -214,3 +214,42 @@ Executor must append RED/GREEN commands, exit codes, test counts, dependency cha
 - 测试仅有既存 Starlette/httpx deprecation warning；无失败、无 skip、无新增依赖。
 
 状态：`machine-complete / v1.1-goal-review-pending / physical-validation-pending`。
+
+## P0-005 Executor Evidence — 2026-08-31
+
+### Authority and scope
+
+- Branch：`codex/ai-realtime-model-service-v1-1`；opening HEAD：
+  `a2ab4947eb1d242cff6716b8543165b206046072`；review base：
+  `dd7ad983ef6502a5d86980f99478742ffc81b7ae`；opening HEAD 为实现/测试 Commit
+  `5a916ebfbfe6dcb6320e80a918a24912017df873` 的祖先。
+- 仅修改 `server/realtime/session.py`、`tests/realtime/test_session.py` 及本任务允许的脱敏证据文件；
+  未修改 `task.yaml`、`review.yaml`、契约或其他端。
+- `config.yaml` 与 `.gitkeep` 仍保持未跟踪，正文未读取，且未被修改、移动、暂存、提交、忽略或删除。
+
+### RED
+
+- `./.venv/bin/python -m pytest tests/realtime/test_session.py::test_interrupted_announce_quarantines_late_terminal_before_new_user_response -q`
+  在修复前 exit `1`；迟到旧 announce `response_id` 的音频与 cancelled terminal 进入 session，产生多余失败事件，
+  暴露后续用户 response owner 污染。
+
+### GREEN and implementation
+
+- announce 失败时 quarantine matching response_id；其迟到 `assistant_text`、audio、audio_done、response_done、
+  error 事件均静默丢弃，不再生成 `session.failed` 或 unavailable。
+- announce utterance 进入已用 owner 集合，后续普通 response 始终分配新 utterance；semantic VAD 的 speech_stopped
+  thinking 仅发一次，正常 text/audio 输出继续使用统一 outbound queue 和 schema `1.1` 全局 sequence/timestamp。
+- 新增 Fake Provider 场景验证 announce.failed 恰好一次、旧事件不出队、新 response 的 thinking/text/started/binary/done
+  各一次及严格顺序。
+- Implementation/test Commit：`5a916ebfbfe6dcb6320e80a918a24912017df873`。
+
+### Verification
+
+- 聚焦 P0：`1 passed / 0 skipped`，修复前 exit `1`，修复后 exit `0`。
+- `./.venv/bin/python -m pytest tests/realtime -q`：`40 passed / 0 skipped`，exit `0`。
+- `./.venv/bin/python -m pytest tests/model_service -q`：`66 passed / 0 skipped`，exit `0`。
+- `./.venv/bin/python -m compileall -q server/realtime server/gateway`：exit `0`；`git diff --check`：exit `0`。
+- 允许路径/隐私扫描通过：未发现设备/会话文件写入、私密配置正文、凭据或私钥；Fake Provider only，
+  Provider calls `0`。未启动 Backend/Node/App/Hardware，未部署、push 或 merge。
+
+状态：`machine-complete / P0-005-review-pending / physical-validation-pending`。
