@@ -2,7 +2,7 @@ schema_version: 1
 task_id: "AI-2026-006"
 initiative_id: "INIT-2026-004"
 domain: "ai"
-status: ready
+status: machine-complete
 risk_level: "medium"
 management_revision: "98581949813339c51028af409202d661d3e81eee"
 contract_revision: "98581949813339c51028af409202d661d3e81eee"

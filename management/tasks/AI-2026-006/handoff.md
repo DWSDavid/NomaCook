@@ -1,5 +1,9 @@
 # AI-2026-006 Handoff
 
+## 2026-08-31 reviewed handoff
+
+Evidence candidate `caf78d48cf2c7e689b8e584ebf752bed0583114b` passed no-code Review; production remains `ed970d81701c02b9e8a1dac3886dda7d9e217d34`. Freeze AI machine scope and wait for Integration candidate sync. Do not rerun or modify AI unless a new production Gate identifies AI as the unique P0 owner.
+
 Run the existing Realtime, Model Service and focused Visual/VLM suites without reading private config or changing source/tests. If green, submit one sanitized evidence-only commit and stop for immediate Manager Review. If a current production-shaped P0 appears, report it and stop; do not expand scope.
 
 ## No-code Validation Handoff — 2026-08-31

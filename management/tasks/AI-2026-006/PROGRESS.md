@@ -1,5 +1,13 @@
 # AI-2026-006 Progress
 
+## 2026-08-31 Manager no-code Review
+
+Status: `machine-complete / MVP-review-passed / staging-validation-pending`.
+
+- Reviewed Head: `caf78d48cf2c7e689b8e584ebf752bed0583114b`.
+- Production candidate remains base `ed970d81701c02b9e8a1dac3886dda7d9e217d34`; no source/test change exists.
+- No current P0 was found; AI scope is frozen pending Mobile Demo Integration/staging.
+
 Status: `ready / no-code-validation-pending`.
 
 - Branch: `codex/mobile-demo-media-v1`.
