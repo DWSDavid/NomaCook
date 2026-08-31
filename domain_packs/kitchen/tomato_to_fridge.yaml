@@ -1,0 +1,71 @@
+# NomaCook Domain Pack: tomato-to-fridge
+# Task: "把番茄放进冰箱" / "Put the tomato into the refrigerator"
+#
+# Perception-layer only. Completion criteria, evidence weights, recovery
+# transitions, and state advancement live in sop/tomato_to_fridge.json.
+
+task_id: tomato_to_fridge_v1
+dish: "把番茄放进冰箱"
+language: zh-CN
+
+perception:
+  detector: YOLO-World
+  detector_weights: yolov8s-worldv2.pt
+  detector_device: mps
+  detector_conf: 0.10
+  hand_tracker: MediaPipe Hands (VIDEO mode)
+  hand_model: weights/hand_landmarker.task
+  detect_every: 3
+  stability_frames: 3
+
+vocab:
+  primary:
+    - tomato
+    - cherry tomato
+    - red fruit
+  scene_anchors:
+    - refrigerator
+    - fridge
+    - freezer
+  surface:
+    - table
+    - kitchen counter
+    - desk
+  cross_check:
+    - hand
+
+canonical_map:
+  tomato: [tomato, cherry tomato, red fruit]
+  refrigerator: [refrigerator, fridge, freezer]
+
+regions:
+  table:
+    type: initial_object_anchor
+    # Kept for loader compatibility; the tracker learns the real origin.
+    fraction: 0.70
+  refrigerator_interior:
+    type: stable_detected
+    # Kept for loader compatibility; an unconfirmed fallback is never trusted.
+    fallback_box:
+      x1: 0
+      y1: 0
+      x2: 0.30
+      y2: 0.50
+
+steps:
+  ready:
+    objects_detect: [tomato]
+  tomato_on_table:
+    objects_detect: [tomato]
+  hand_near_tomato:
+    objects_detect: [tomato]
+  tomato_held:
+    objects_detect: [tomato, refrigerator]
+  tomato_in_transit:
+    objects_detect: [tomato, refrigerator]
+  fridge_interaction:
+    objects_detect: [tomato, refrigerator]
+  candidate_inside_fridge:
+    objects_detect: [tomato, refrigerator]
+  tomato_released_inside:
+    objects_detect: [tomato, refrigerator]

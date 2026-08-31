@@ -15,6 +15,14 @@ class Ingredient(BaseModel):
     amount: str = Field(min_length=1)
 
 
+class RecoveryTransition(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    event_type: str = Field(min_length=1)
+    payload_matches: dict[str, Any] = Field(default_factory=dict)
+    target_step_id: str = Field(min_length=1)
+
+
 class EvidenceRule(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -24,6 +32,7 @@ class EvidenceRule(BaseModel):
     weight: float = Field(gt=0.0, le=1.0)
     min_confidence: float = Field(ge=0.0, le=1.0)
     advances_confirmation_streak: bool = True
+    source_group: str = Field(default="default", min_length=1)
 
 
 class CompletionPolicy(BaseModel):
@@ -35,6 +44,8 @@ class CompletionPolicy(BaseModel):
     question_after_ms: int = Field(ge=0)
     question: str = Field(min_length=1)
     evidence_rules: tuple[EvidenceRule, ...] = Field(min_length=1)
+    min_source_groups: int = Field(default=1, ge=1)
+    evidence_window_ms: int = Field(default=5_000, ge=100)
 
     @model_validator(mode="after")
     def validate_policy(self) -> "CompletionPolicy":
@@ -45,6 +56,12 @@ class CompletionPolicy(BaseModel):
             raise ValueError("evidence rule ids must be unique within a step")
         if sum(rule.weight for rule in self.evidence_rules) < self.threshold:
             raise ValueError("evidence rule weights cannot reach threshold")
+        unique_groups = {rule.source_group for rule in self.evidence_rules}
+        if self.min_source_groups > len(unique_groups):
+            raise ValueError(
+                f"min_source_groups ({self.min_source_groups}) exceeds "
+                f"distinct source groups ({len(unique_groups)})"
+            )
         return self
 
 
@@ -69,6 +86,8 @@ class RecipeStep(BaseModel):
     failure_modes: tuple[str, ...] = ()
     high_risk: bool = False
     completion_policy: CompletionPolicy
+    next_step_id: str | None = None
+    recovery_transitions: tuple[RecoveryTransition, ...] = ()
 
 
 class RecipeSOP(BaseModel):
@@ -90,6 +109,19 @@ class RecipeSOP(BaseModel):
         expected = list(range(1, len(self.steps) + 1))
         if sequences != expected:
             raise ValueError(f"step sequences must be contiguous and ordered: {expected}")
+        step_ids = {step.id for step in self.steps}
+        for step in self.steps:
+            if step.next_step_id is not None and step.next_step_id not in step_ids:
+                raise ValueError(
+                    f"step {step.id!r} references unknown next_step_id "
+                    f"{step.next_step_id!r}"
+                )
+            for edge in step.recovery_transitions:
+                if edge.target_step_id not in step_ids:
+                    raise ValueError(
+                        f"step {step.id!r} recovery references unknown "
+                        f"target_step_id {edge.target_step_id!r}"
+                    )
         return self
 
 

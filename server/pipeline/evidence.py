@@ -44,6 +44,8 @@ def _base(
     source: str,
     payload: Any,
     confidence: float | None,
+    context_version: int | None = None,
+    runtime_mode: str = "RUN",
 ) -> EventEnvelope:
     stamp = t_server_for(pts_ms)
     return create_event(
@@ -58,6 +60,8 @@ def _base(
         payload=payload,
         event_id=event_id_for(session_id, seq),
         confidence=confidence,
+        context_version=context_version,
+        runtime_mode=runtime_mode,
     )
 
 
@@ -165,6 +169,7 @@ def scripted_event(
     session_id: str,
     seq: int,
     question_event_id: str | None,
+    context_version: int | None = None,
 ) -> EventEnvelope:
     pts_ms = float(row["pts_ms"])
     step_id = row["step_id"]
@@ -182,6 +187,7 @@ def scripted_event(
                 "reason": "scripted",
             },
             confidence=float(row.get("confidence", 0.8)),
+            context_version=context_version,
         )
     if row["type"] == "voice.user_confirmation":
         return _base(
@@ -198,5 +204,6 @@ def scripted_event(
                 "question_event_id": question_event_id or f"script_q_{index}",
             },
             confidence=float(row.get("confidence", 0.95)),
+            context_version=context_version,
         )
     raise ValueError(f"unsupported scripted event type {row['type']!r}")

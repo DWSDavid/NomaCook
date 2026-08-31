@@ -1,0 +1,332 @@
+{
+  "schema_version": "1.0",
+  "recipe_version_id": "tomato_to_fridge_v1",
+  "dish": "把番茄放进冰箱",
+  "language": "zh-CN",
+  "ingredients": [
+    {"name": "tomato", "amount": "1个"}
+  ],
+  "steps": [
+    {
+      "id": "ready",
+      "sequence": 1,
+      "title": "开始",
+      "instruction": "请拿起桌上的番茄，把它放进冰箱。",
+      "objects_involved": ["tomato", "table"],
+      "completion_check": "番茄已经被可靠定位。",
+      "est_duration_sec": 5,
+      "check_policy": "continuous_evidence",
+      "failure_modes": ["番茄不可见"],
+      "completion_policy": {
+        "threshold": 0.8,
+        "consecutive_hits": 1,
+        "question_min_score": 0.4,
+        "question_after_ms": 3000,
+        "question": "我还没看清番茄，它现在在画面里吗？",
+        "evidence_window_ms": 3000,
+        "min_source_groups": 1,
+        "evidence_rules": [
+          {
+            "id": "tomato_visible",
+            "event_type": "OBJECT_PRESENT",
+            "payload_matches": {"object": "tomato"},
+            "weight": 0.8,
+            "min_confidence": 0.35,
+            "advances_confirmation_streak": true,
+            "source_group": "detection"
+          }
+        ]
+      },
+      "next_step_id": "tomato_on_table",
+      "recovery_transitions": []
+    },
+    {
+      "id": "tomato_on_table",
+      "sequence": 2,
+      "title": "番茄在桌上",
+      "instruction": "番茄在桌上，请靠近它。",
+      "objects_involved": ["tomato", "table"],
+      "completion_check": "番茄稳定地位于桌面上。",
+      "est_duration_sec": 5,
+      "check_policy": "continuous_evidence",
+      "failure_modes": ["番茄不在桌上"],
+      "completion_policy": {
+        "threshold": 0.8,
+        "consecutive_hits": 1,
+        "question_min_score": 0.4,
+        "question_after_ms": 3000,
+        "question": "番茄还在桌面上吗？",
+        "evidence_window_ms": 3000,
+        "min_source_groups": 1,
+        "evidence_rules": [
+          {
+            "id": "tomato_stable_on_table",
+            "event_type": "OBJECT_STABLE_IN_REGION",
+            "payload_matches": {"object": "tomato", "region": "table"},
+            "weight": 0.8,
+            "min_confidence": 0.35,
+            "advances_confirmation_streak": true,
+            "source_group": "object_region"
+          }
+        ]
+      },
+      "next_step_id": "hand_near_tomato",
+      "recovery_transitions": []
+    },
+    {
+      "id": "hand_near_tomato",
+      "sequence": 3,
+      "title": "手靠近番茄",
+      "instruction": "手靠近番茄了，请拿起它。",
+      "objects_involved": ["tomato", "table"],
+      "completion_check": "手靠近番茄。",
+      "est_duration_sec": 5,
+      "check_policy": "continuous_evidence",
+      "failure_modes": ["手未靠近番茄"],
+      "completion_policy": {
+        "threshold": 0.8,
+        "consecutive_hits": 1,
+        "question_min_score": 0.4,
+        "question_after_ms": 3000,
+        "question": "你的手靠近番茄了吗？",
+        "evidence_window_ms": 3000,
+        "min_source_groups": 1,
+        "evidence_rules": [
+          {
+            "id": "hand_near",
+            "event_type": "HAND_NEAR_STARTED",
+            "payload_matches": {"object": "tomato"},
+            "weight": 0.8,
+            "min_confidence": 0.65,
+            "advances_confirmation_streak": true,
+            "source_group": "hand_relation"
+          }
+        ]
+      },
+      "next_step_id": "tomato_held",
+      "recovery_transitions": [
+        {
+          "event_type": "HAND_NEAR_ENDED",
+          "payload_matches": {},
+          "target_step_id": "tomato_on_table"
+        }
+      ]
+    },
+    {
+      "id": "tomato_held",
+      "sequence": 4,
+      "title": "手拿番茄",
+      "instruction": "你拿着番茄了，请把它移向冰箱。",
+      "objects_involved": ["tomato", "table", "refrigerator"],
+      "completion_check": "手正在拿着番茄。",
+      "est_duration_sec": 10,
+      "check_policy": "continuous_evidence",
+      "failure_modes": ["番茄掉落"],
+      "completion_policy": {
+        "threshold": 0.8,
+        "consecutive_hits": 1,
+        "question_min_score": 0.4,
+        "question_after_ms": 3000,
+        "question": "你还拿着番茄吗？",
+        "evidence_window_ms": 3000,
+        "min_source_groups": 2,
+        "evidence_rules": [
+          {
+            "id": "holding_started",
+            "event_type": "HOLDING_STARTED",
+            "payload_matches": {"object": "tomato"},
+            "weight": 0.5,
+            "min_confidence": 0.65,
+            "advances_confirmation_streak": true,
+            "source_group": "hand_relation"
+          },
+          {
+            "id": "shared_motion",
+            "event_type": "OBJECT_MOVING_WITH_HAND",
+            "payload_matches": {"object": "tomato"},
+            "weight": 0.4,
+            "min_confidence": 0.65,
+            "advances_confirmation_streak": true,
+            "source_group": "motion"
+          }
+        ]
+      },
+      "next_step_id": "tomato_in_transit",
+      "recovery_transitions": [
+        {
+          "event_type": "OBJECT_RETURNED_TO_REGION",
+          "payload_matches": {"object": "tomato", "region": "table"},
+          "target_step_id": "tomato_on_table"
+        }
+      ]
+    },
+    {
+      "id": "tomato_in_transit",
+      "sequence": 5,
+      "title": "移动中",
+      "instruction": "番茄正在移动，请继续移向冰箱。",
+      "objects_involved": ["tomato", "refrigerator"],
+      "completion_check": "番茄离开了桌面，正在移向冰箱。",
+      "est_duration_sec": 15,
+      "check_policy": "continuous_evidence",
+      "failure_modes": ["番茄返回桌面"],
+      "completion_policy": {
+        "threshold": 0.8,
+        "consecutive_hits": 1,
+        "question_min_score": 0.4,
+        "question_after_ms": 3000,
+        "question": "番茄在移向冰箱吗？",
+        "evidence_window_ms": 3000,
+        "min_source_groups": 2,
+        "evidence_rules": [
+          {
+            "id": "left_table",
+            "event_type": "OBJECT_LEFT_REGION",
+            "payload_matches": {"object": "tomato", "region": "table"},
+            "weight": 0.4,
+            "min_confidence": 0.35,
+            "advances_confirmation_streak": true,
+            "source_group": "object_region"
+          },
+          {
+            "id": "shared_motion",
+            "event_type": "OBJECT_MOVING_WITH_HAND",
+            "payload_matches": {"object": "tomato"},
+            "weight": 0.5,
+            "min_confidence": 0.65,
+            "advances_confirmation_streak": true,
+            "source_group": "motion"
+          }
+        ]
+      },
+      "next_step_id": "fridge_interaction",
+      "recovery_transitions": [
+        {
+          "event_type": "OBJECT_RETURNED_TO_REGION",
+          "payload_matches": {"object": "tomato", "region": "table"},
+          "target_step_id": "tomato_on_table"
+        }
+      ]
+    },
+    {
+      "id": "fridge_interaction",
+      "sequence": 6,
+      "title": "靠近冰箱",
+      "instruction": "番茄已经靠近冰箱了，请把它放进去。",
+      "objects_involved": ["tomato", "refrigerator"],
+      "completion_check": "用户拿着番茄到达冰箱前，手靠近冰箱区域。",
+      "est_duration_sec": 10,
+      "check_policy": "continuous_evidence",
+      "failure_modes": ["番茄未进入冰箱"],
+      "completion_policy": {
+        "threshold": 0.8,
+        "consecutive_hits": 2,
+        "question_min_score": 0.4,
+        "question_after_ms": 3000,
+        "question": "你拿着番茄到冰箱前了吗？",
+        "evidence_window_ms": 5000,
+        "min_source_groups": 1,
+        "evidence_rules": [
+          {
+            "id": "fridge_interaction",
+            "event_type": "DESTINATION_INTERACTION",
+            "payload_matches": {"region": "refrigerator"},
+            "weight": 0.8,
+            "min_confidence": 0.65,
+            "advances_confirmation_streak": true,
+            "source_group": "destination"
+          }
+        ]
+      },
+      "next_step_id": "candidate_inside_fridge",
+      "recovery_transitions": [
+        {
+          "event_type": "OBJECT_MOVED_AWAY_FROM_DESTINATION",
+          "payload_matches": {},
+          "target_step_id": "tomato_in_transit"
+        }
+      ]
+    },
+    {
+      "id": "candidate_inside_fridge",
+      "sequence": 7,
+      "title": "候选进入冰箱",
+      "instruction": "番茄看起来在冰箱里了，请松手并确认。",
+      "objects_involved": ["tomato", "refrigerator"],
+      "completion_check": "番茄在冰箱打开后进入内部区域。",
+      "est_duration_sec": 5,
+      "check_policy": "continuous_evidence",
+      "failure_modes": ["番茄未真正放入"],
+      "completion_policy": {
+        "threshold": 0.8,
+        "consecutive_hits": 1,
+        "question_min_score": 0.4,
+        "question_after_ms": 3000,
+        "question": "番茄已经放在冰箱里了吗？",
+        "evidence_window_ms": 3000,
+        "min_source_groups": 1,
+        "evidence_rules": [
+          {
+            "id": "entered_fridge",
+            "event_type": "OBJECT_ENTERED_REGION",
+            "payload_matches": {"object": "tomato", "region": "refrigerator_interior"},
+            "weight": 0.8,
+            "min_confidence": 0.35,
+            "advances_confirmation_streak": true,
+            "source_group": "object_region"
+          }
+        ]
+      },
+      "next_step_id": "tomato_released_inside",
+      "recovery_transitions": []
+    },
+    {
+      "id": "tomato_released_inside",
+      "sequence": 8,
+      "title": "松手放入冰箱",
+      "instruction": "你已经松手了，番茄应该在冰箱里。等待确认。",
+      "objects_involved": ["tomato", "refrigerator"],
+      "completion_check": "番茄被松开在冰箱内部，且稳定停留。",
+      "est_duration_sec": 10,
+      "check_policy": "continuous_evidence",
+      "failure_modes": ["番茄可能没有稳定放置"],
+      "completion_policy": {
+        "threshold": 0.8,
+        "consecutive_hits": 1,
+        "question_min_score": 0.4,
+        "question_after_ms": 3000,
+        "question": "番茄在冰箱里稳定放好了吗？",
+        "evidence_window_ms": 3000,
+        "min_source_groups": 1,
+        "evidence_rules": [
+          {
+            "id": "release_occluded",
+            "event_type": "VISIBILITY_LOST",
+            "payload_matches": {"object": "tomato"},
+            "weight": 0.4,
+            "min_confidence": 0.35,
+            "advances_confirmation_streak": false,
+            "source_group": "visibility"
+          },
+          {
+            "id": "stable_inside",
+            "event_type": "OBJECT_STABLE_IN_REGION",
+            "payload_matches": {"object": "tomato", "region": "refrigerator_interior"},
+            "weight": 0.8,
+            "min_confidence": 0.35,
+            "advances_confirmation_streak": true,
+            "source_group": "region_stability"
+          }
+        ]
+      },
+      "next_step_id": null,
+      "recovery_transitions": [
+        {
+          "event_type": "OBJECT_EXITED_REGION",
+          "payload_matches": {"object": "tomato", "region": "refrigerator_interior"},
+          "target_step_id": "tomato_held"
+        }
+      ]
+    }
+  ]
+}

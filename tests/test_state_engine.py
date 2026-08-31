@@ -36,6 +36,7 @@ def make_recipe(*, high_risk: bool = False) -> RecipeSOP:
                         "question_min_score": 0.4,
                         "question_after_ms": 30_000,
                         "question": "is it ready?",
+                        "evidence_window_ms": 60_000,
                         "evidence_rules": [
                             {
                                 "id": "holding",
@@ -75,6 +76,7 @@ def make_recipe(*, high_risk: bool = False) -> RecipeSOP:
                         "question_min_score": 0.4,
                         "question_after_ms": 30_000,
                         "question": "is it plated?",
+                        "evidence_window_ms": 60_000,
                         "evidence_rules": [
                             {
                                 "id": "plated",

@@ -1,8 +1,16 @@
-"""Thin Google GenAI adapter; business validation remains in schema.py."""
+"""Thin Google GenAI adapter; business validation remains in schema.py.
+
+Also provides QwenVLMClient for offline SHADOW evaluation (stdlib HTTP only).
+"""
 
 from __future__ import annotations
 
+import base64
+import json
+import os
 import time
+import urllib.error
+import urllib.request
 
 from google import genai
 from google.genai import types
@@ -146,3 +154,245 @@ class GeminiVLMClient:
         if not response.text:
             raise RuntimeError("Gemini VLM returned no structured text")
         return VLMObservation.model_validate_json(response.text)
+
+    def analyze_contact_sheet(
+        self,
+        question: str,
+        image_bytes: bytes,
+        *,
+        mime_type: str = "image/jpeg",
+    ) -> dict:
+        """Offline SHADOW cross-check: answer a specific yes/no question about a
+        contact sheet. Returns {"answer", "confidence"}. Never feeds StateEngine."""
+        if not image_bytes:
+            raise ValueError("image_bytes cannot be empty")
+        prompt = (
+            "你是离线影子评估器，仅根据这张拼接图回答一个具体问题。\n"
+            "只回答 yes 或 no，并给出 0-1 的置信度。不要补充解释。\n"
+            f"问题: {question}\n"
+            '以 JSON 返回: {"answer": "yes"|"no", "confidence": 0.0-1.0}'
+        )
+        response = self._client.models.generate_content(
+            model=self.model,
+            contents=[
+                prompt,
+                types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+            ],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "answer": types.Schema(
+                            type=types.Type.STRING, enum=["yes", "no"]
+                        ),
+                        "confidence": types.Schema(type=types.Type.NUMBER),
+                    },
+                    required=["answer", "confidence"],
+                ),
+            ),
+        )
+        if not response.text:
+            raise RuntimeError("Gemini VLM returned no shadow answer")
+        data = json.loads(response.text)
+        return {
+            "answer": data.get("answer"),
+            "confidence": float(data.get("confidence", 0.0)),
+        }
+
+
+# ── Qwen VLM (offline SHADOW evaluation) ──
+
+QWEN_DEFAULT_MODEL = "qwen3.6-flash"
+QWEN_REGION = "cn-beijing"
+
+
+class QwenVLMError(RuntimeError):
+    """Structured SHADOW-VLM failure. `category` is a safe enum for reports;
+    never embed API keys, headers, or the full data URL."""
+
+    def __init__(self, category: str, message: str = "") -> None:
+        super().__init__(message)
+        self.category = category
+
+
+def _qwen_env(name: str, default: str | None = None) -> str | None:
+    value = (os.environ.get(name) or "").strip()
+    if value:
+        return value
+    try:
+        from dotenv import dotenv_values
+        from server.gemini_config import REPO_ENV_PATH
+        value = str(dotenv_values(REPO_ENV_PATH).get(name) or "").strip()
+        if value:
+            return value
+    except Exception:
+        pass
+    return default
+
+
+def qwen_vlm_configured() -> bool:
+    return bool(_qwen_env("DASHSCOPE_API_KEY")) and bool(
+        _qwen_env("BAILIAN_WORKSPACE_ID")
+    )
+
+
+class QwenVLMClient:
+    """Offline SHADOW cross-checker using the Beijing compatible-mode endpoint.
+
+    stdlib HTTP only; no OpenAI/DashScope SDK. Never feeds StateEngine.
+    """
+
+    provider = "qwen"
+    region = QWEN_REGION
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        workspace_id: str | None = None,
+        model: str | None = None,
+        attempts: int = 3,
+        timeout: float = 30.0,
+    ) -> None:
+        self._api_key = api_key or _qwen_env("DASHSCOPE_API_KEY") or ""
+        self._workspace_id = workspace_id or _qwen_env("BAILIAN_WORKSPACE_ID") or ""
+        if not self._api_key or not self._workspace_id:
+            raise QwenVLMError(
+                "not_configured", "DASHSCOPE_API_KEY or BAILIAN_WORKSPACE_ID missing"
+            )
+        self.model = model or _qwen_env("QWEN_VLM_MODEL") or QWEN_DEFAULT_MODEL
+        self.attempts = max(1, attempts)
+        self.timeout = timeout
+        self._url = (
+            f"https://{self._workspace_id}.{QWEN_REGION}.maas.aliyuncs.com"
+            f"/compatible-mode/v1/chat/completions"
+        )
+
+    def analyze_contact_sheet(
+        self,
+        question: str,
+        image_bytes: bytes,
+        *,
+        mime_type: str = "image/jpeg",
+    ) -> dict:
+        if not image_bytes:
+            raise QwenVLMError("empty_input", "image_bytes cannot be empty")
+
+        prompt = (
+            "你是离线影子评估器，仅根据这张拼接图回答一个具体问题。\n"
+            "只能回答 yes 或 no，并给出 0-1 的置信度，不要补充解释。\n"
+            f"问题: {question}\n"
+            '以 JSON 返回: {"answer": "yes" 或 "no", "confidence": 0.0 到 1.0}'
+        )
+        b64 = base64.b64encode(image_bytes).decode()
+        data_url = f"data:{mime_type};base64,{b64}"
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                }
+            ],
+            "enable_thinking": False,
+            "response_format": {"type": "json_object"},
+        }
+
+        last_error: QwenVLMError | None = None
+        attempts_used = 0
+        for attempt in range(1, self.attempts + 1):
+            attempts_used = attempt
+            started = time.monotonic()
+            try:
+                body = json.dumps(payload).encode("utf-8")
+                req = urllib.request.Request(self._url, data=body, method="POST")
+                req.add_header("Content-Type", "application/json")
+                req.add_header("Authorization", f"Bearer {self._api_key}")
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    raw = resp.read().decode("utf-8")
+                result = json.loads(raw)
+            except urllib.error.HTTPError as exc:
+                last_error = _http_error(exc)
+            except urllib.error.URLError as exc:
+                last_error = QwenVLMError("http", _safe_reason(exc))
+            except TimeoutError:
+                last_error = QwenVLMError("timeout", "request timed out")
+            except json.JSONDecodeError:
+                last_error = QwenVLMError("invalid_json", "response is not valid JSON")
+            except Exception as exc:  # noqa: BLE001 - stdlib HTTP variants
+                last_error = QwenVLMError("http", _safe_reason(exc))
+            else:
+                latency_ms = (time.monotonic() - started) * 1000.0
+                answer, confidence = self._parse_answer(result)
+                return {
+                    "answer": answer,
+                    "confidence": confidence,
+                    "latency_ms": round(latency_ms, 2),
+                    "attempts": attempts_used,
+                }
+
+            if attempt == self.attempts:
+                break
+            # access_denied / unauthorized are deterministic; retrying wastes time
+            if last_error.category in ("access_denied", "unauthorized"):
+                break
+            time.sleep(2 ** (attempt - 1))
+
+        assert last_error is not None
+        raise last_error
+
+    def _parse_answer(self, result: dict) -> tuple[str, float]:
+        try:
+            content = result["choices"][0]["message"]["content"]
+            if isinstance(content, str):
+                data = json.loads(content)
+            else:
+                data = content
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError):
+            raise QwenVLMError("invalid_response", "unexpected response shape")
+
+        answer = data.get("answer")
+        if answer not in ("yes", "no"):
+            raise QwenVLMError("invalid_answer", f"answer {answer!r} not yes/no")
+
+        try:
+            confidence = float(data.get("confidence"))
+        except (TypeError, ValueError):
+            raise QwenVLMError("invalid_confidence", "confidence not numeric")
+        if not 0.0 <= confidence <= 1.0:
+            raise QwenVLMError("invalid_confidence", f"confidence {confidence} out of range")
+
+        return answer, round(confidence, 4)
+
+
+def _safe_reason(exc: BaseException) -> str:
+    reason = getattr(exc, "reason", None)
+    if reason is None:
+        return type(exc).__name__
+    text = str(reason)
+    # strip anything that looks like a key or a long data URL
+    if "base64" in text or "Bearer" in text or "sk-" in text:
+        return "http error (details withheld)"
+    return text[:200]
+
+
+def _http_error(exc: urllib.error.HTTPError) -> QwenVLMError:
+    """Categorize an HTTPError without leaking the API key or request body."""
+    body = ""
+    try:
+        body = exc.read().decode("utf-8", "replace")[:500]
+    except Exception:
+        pass
+    low = body.lower()
+    if exc.code in (401, 403) and ("accessdenied" in low or "denied" in low or "unpurchased" in low):
+        return QwenVLMError("access_denied", "model access denied")
+    if exc.code in (401, 403):
+        return QwenVLMError("unauthorized", "authentication or permission denied")
+    if exc.code >= 500:
+        return QwenVLMError("server_error", f"HTTP {exc.code}")
+    return QwenVLMError("http", f"HTTP {exc.code}")

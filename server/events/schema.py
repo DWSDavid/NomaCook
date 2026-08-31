@@ -76,6 +76,8 @@ class EventEnvelope(BaseModel):
     backfill: bool = False
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     payload: dict[str, Any] = Field(default_factory=dict)
+    context_version: int | None = Field(default=None, ge=1)
+    runtime_mode: Literal["RUN", "SHADOW", "REPLAY_EVAL"] = "RUN"
 
     @field_validator("t_device_ms")
     @classmethod
@@ -113,6 +115,8 @@ def create_event(
     audio_range: AudioRange | None = None,
     backfill: bool = False,
     confidence: float | None = None,
+    context_version: int | None = None,
+    runtime_mode: Literal["RUN", "SHADOW", "REPLAY_EVAL"] = "RUN",
 ) -> EventEnvelope:
     """Create a validated envelope at the session-service boundary."""
 
@@ -135,4 +139,6 @@ def create_event(
         backfill=backfill,
         confidence=confidence,
         payload=payload_dict,
+        context_version=context_version,
+        runtime_mode=runtime_mode,
     )
